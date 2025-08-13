@@ -45,7 +45,7 @@ def get_latest_date_from_db():
 
 async def crawl_incremental_links():
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False)
+        browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
 
         await page.goto("https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/")
@@ -191,7 +191,7 @@ def check_existing_urls(new_urls):
 async def crawl_brand_detail(url):
     async with async_playwright() as p:
         try:
-            browser= await p.chromium.launch(headless=False)
+            browser= await p.chromium.launch(headless=True)
             page= await browser.new_page()
 
             await page.goto(url) #url로 이동
