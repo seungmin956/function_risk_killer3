@@ -45,17 +45,43 @@ def get_latest_date_from_db():
 
 async def crawl_incremental_links():
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(
+            headless=True,
+            args=['--no-sandbox', '--disable-dev-shm-usage']  # 이 옵션들이 필요
+        )
         page = await browser.new_page()
 
-        await page.goto("https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/")
         try:
-            await page.wait_for_selector("#edit-field-regulated-product-field", timeout=10000)
-            await page.locator("#edit-field-regulated-product-field").select_option(value="2323")
-            await page.wait_for_load_state('networkidle')
-            print("✅ Food & Beverages 필터 적용됨")
+            await page.goto("https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/")
+            
+            # 여러 셀렉터 시도
+            selectors_to_try = [
+                "#edit-field-regulated-product-field",
+                "select[name='field_regulated_product_field']", 
+                "[data-drupal-selector*='regulated-product']",
+                "select:has(option[value='2323'])"
+            ]
+            
+            dropdown_found = False
+            for selector in selectors_to_try:
+                try:
+                    await page.wait_for_selector(selector, timeout=15000)
+                    await page.locator(selector).select_option(value="2323")
+                    await page.wait_for_load_state('networkidle')
+                    print(f"✅ Food & Beverages 필터 성공: {selector}")
+                    dropdown_found = True
+                    break
+                except Exception as e:
+                    print(f"❌ 시도 실패: {selector}")
+                    continue
+            
+            if not dropdown_found:
+                print("💥 필수 필터링 실패 - 크롤링 중단")
+                return []  # 빈 리스트 반환하여 크롤링 중단
+                
         except Exception as e:
-            print(f"⚠️ 필터 적용 실패, 전체 데이터에서 크롤링: {e}")
+            print(f"💥 페이지 로딩 실패 - 크롤링 중단: {e}")
+            return []
 
         base_url = "https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/"
         all_brand_urls = []
@@ -74,8 +100,16 @@ async def crawl_incremental_links():
         print(f"🎯 목표 날짜 범위: {target_dates}")
         
         # 기존 while True 루프 내부 수정:
-        while True:
+        max_pages = 10  # 안전장치
+        while current_page_count <= max_pages:
             print(f"현재 {current_page_count}페이지 처리 중...")
+            
+            # 테이블 존재 확인
+            try:
+                await page.wait_for_selector("table tbody tr", timeout=15000)
+            except Exception as e:
+                print(f"⚠️ 테이블을 찾을 수 없음: {e}")
+                break
             
             # ⭐ 핵심 변경: 날짜와 링크를 동시에 수집
             date_elements = await page.locator("td:nth-child(1)").all()  # 날짜
@@ -147,6 +181,18 @@ async def crawl_incremental_links():
             if not page_has_target_dates and consecutive_misses > 5:
                 print(f"🔚 페이지 {current_page_count}에서 목표 날짜 없음 - 크롤링 종료")
                 break
+
+            try:
+                next_button = page.locator("a[rel='next']")
+                if await next_button.count() == 0:
+                    print("🔚 다음 페이지 없음 - 종료")
+                    break
+                await next_button.click()
+                await page.wait_for_load_state('networkidle')
+                current_page_count += 1
+            except Exception as e:
+                print(f"🔚 페이지 이동 실패 - 종료: {e}")
+                break
         
         # 중복 제거 및 최종 결과
         seen_urls = set()
@@ -196,7 +242,10 @@ def check_existing_urls(new_urls):
 async def crawl_brand_detail(url):
     async with async_playwright() as p:
         try:
-            browser= await p.chromium.launch(headless=True)
+            browser = await p.chromium.launch(
+                headless=True,
+                args=['--no-sandbox', '--disable-dev-shm-usage']  # 이 옵션들이 필요
+            )
             page= await browser.new_page()
 
             await page.goto(url) #url로 이동
