@@ -54,30 +54,42 @@ async def crawl_incremental_links():
         try:
             await page.goto("https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/")
             
-            # 여러 셀렉터 시도
+            # 🆕 더 오래 기다리고 디버깅 정보 추가
+            print("📍 페이지 로딩 완료, 요소 찾는 중...")
+            
+            # 🆕 페이지 소스 일부 출력 (디버깅용)
+            content = await page.content()
+            if "edit-field-regulated-product-field" in content:
+                print("✅ 셀렉터가 HTML에 존재함")
+            else:
+                print("❌ 셀렉터가 HTML에 없음")
+            
+            # 🆕 더 긴 대기 시간과 다양한 대기 조건
             selectors_to_try = [
                 "#edit-field-regulated-product-field",
                 "select[name='field_regulated_product_field']", 
                 "[data-drupal-selector*='regulated-product']",
-                "select:has(option[value='2323'])"
+                "select:has(option[value='2323'])",
+                "select[id*='regulated-product']"  # 추가
             ]
             
             dropdown_found = False
             for selector in selectors_to_try:
                 try:
-                    await page.wait_for_selector(selector, timeout=15000)
+                    print(f"🔍 시도 중: {selector}")
+                    # 🆕 더 긴 대기 시간
+                    await page.wait_for_selector(selector, timeout=30000)
+                    # 🆕 요소가 보이는지 확인
+                    await page.wait_for_selector(selector, state="visible", timeout=10000)
+                    
                     await page.locator(selector).select_option(value="2323")
                     await page.wait_for_load_state('networkidle')
                     print(f"✅ Food & Beverages 필터 성공: {selector}")
                     dropdown_found = True
                     break
                 except Exception as e:
-                    print(f"❌ 시도 실패: {selector}")
+                    print(f"❌ 시도 실패: {selector} - {str(e)}")
                     continue
-            
-            if not dropdown_found:
-                print("💥 필수 필터링 실패 - 크롤링 중단")
-                return []  # 빈 리스트 반환하여 크롤링 중단
                 
         except Exception as e:
             print(f"💥 페이지 로딩 실패 - 크롤링 중단: {e}")
