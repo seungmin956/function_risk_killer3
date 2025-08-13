@@ -247,9 +247,22 @@ async def crawl_brand_detail(url):
             # print(f"브랜드명:{brand_name}")
 
         #리콜원인 추출
-            recall_reason_element= page.locator("dt:has-text('Product Type')+ dd")
-            total_recall_reason= await recall_reason_element.text_content()
-            recall_reason= total_recall_reason.split()[-1]
+            try:
+                recall_reason_element = page.locator("dt:has-text('Product Type') + dd")
+                total_recall_reason = await recall_reason_element.text_content()
+                
+                if total_recall_reason and total_recall_reason.strip():
+                    # 두 번째 줄이나 마지막 단어 추출
+                    lines = total_recall_reason.strip().split('\n')
+                    if len(lines) >= 2:
+                        recall_reason = lines[1].strip()  # 두 번째 줄
+                    else:
+                        recall_reason = total_recall_reason.split()[-1]  # 마지막 단어
+                else:
+                    recall_reason = ""
+            except Exception as e:
+                print(f"⚠️ 리콜원인 추출 실패: {e}")
+                recall_reason = ""
 
             # print(f"리콜원인:{recall_reason}")
 
