@@ -90,30 +90,6 @@ async def crawl_incremental_links():
         while current_page_count <= max_pages:
             print(f"현재 {current_page_count}페이지 처리 중...")
             
-            # 🆕 다양한 테이블 셀렉터 시도
-            table_selectors = [
-                "table tbody tr",
-                ".view-content .views-row", 
-                "table tr",
-                ".views-table tbody tr"
-            ]
-            
-            rows_found = False
-            for table_selector in table_selectors:
-                try:
-                    await page.wait_for_selector(table_selector, timeout=15000)
-                    rows = await page.locator(table_selector).all()
-                    if len(rows) > 0:
-                        print(f"✅ 테이블 발견: {len(rows)}개 행 ({table_selector})")
-                        rows_found = True
-                        break
-                except:
-                    continue
-            
-            if not rows_found:
-                print("⚠️ 테이블을 찾을 수 없음 - 종료")
-                break
-            
             # 🆕 조건부 데이터 수집
             try:
                 # 날짜, 링크, Product Type 동시 수집
