@@ -95,6 +95,9 @@ async def crawl_incremental_links():
             # 페이지 소스 일부 출력
             content = await page.content()
             print(f"📄 페이지 크기: {len(content)} 문자")
+            print(f"📝 페이지 전체 내용:")
+            print(content)
+            print("=" * 50)
 
             # td 요소 확인
             td_count = await page.locator("td").count()
