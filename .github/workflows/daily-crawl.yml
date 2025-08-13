@@ -4,7 +4,7 @@ name: FDA Recall Data Daily Crawling
 on:
   schedule:
     # 매일 정오 KST (UTC 03:00)
-    - cron: '0 3 * * *'
+    - cron: '1 5 * * *'
   workflow_dispatch:  # 수동 실행 가능
 
 jobs:
@@ -15,7 +15,8 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-      
+      with:
+        lfs: true    
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
