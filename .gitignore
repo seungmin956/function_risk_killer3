@@ -1,0 +1,42 @@
+# Python 캐시 및 환경
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Streamlit
+.streamlit/
+
+# Environment variables
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+
+# 데이터 폴더는 추적 (LFS 사용)
+!data/
+!data/**
+
+# GitHub Actions 관련
+.github/workflows/

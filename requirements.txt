@@ -1,0 +1,54 @@
+# Core Streamlit and web framework
+streamlit>=1.28.0,<2.0.0
+
+# LangChain ecosystem (핵심 패키지들)
+langchain>=0.1.0,<0.2.0
+langchain-openai>=0.1.0,<0.2.0
+langchain-community>=0.0.10,<0.1.0
+langchain-core>=0.1.0,<0.2.0
+langgraph>=0.0.26,<0.1.0
+langchain-teddynote>=0.0.24,<1.0.0
+
+# Vector database
+chromadb>=0.4.0,<2.0.0
+
+# OpenAI
+openai>=1.0.0,<2.0.0
+
+# Web scraping and automation
+selenium>=4.0.0,<5.0.0
+webdriver-manager>=4.0.0,<5.0.0
+beautifulsoup4>=4.12.0,<5.0.0
+requests>=2.31.0,<3.0.0
+# ✅ 추가: Playwright (GitHub Actions 크롤링용)
+playwright>=1.40.0,<2.0.0
+
+# Data processing and analysis
+pandas>=2.0.0,<3.0.0
+numpy>=1.24.0,<2.0.0
+
+# Visualization
+plotly>=5.15.0,<6.0.0
+
+# Environment variables
+python-dotenv>=1.0.0,<2.0.0
+
+# Excel file handling
+openpyxl>=3.1.0,<4.0.0
+xlsxwriter>=3.1.0,<4.0.0
+
+# Image processing
+Pillow>=9.5.0,<11.0.0
+
+# Database
+pysqlite3-binary>=0.5.0
+
+# Built-in modules (no installation needed)
+# sqlite3, asyncio, typing-extensions, threading, concurrent.futures
+# logging, re, time, datetime, os, glob, json, io, functools
+
+# ========================================
+# GitHub Actions 자동화용 추가 패키지들
+# ========================================
+# Note: 위의 패키지들이 대부분 커버하므로 playwright만 추가하면 됨
+# chromadb, openai, python-dotenv는 이미 위에 포함됨
