@@ -236,7 +236,7 @@ async def crawl_brand_detail(url):
                     brand_names=[]
                     for i in range(brand_count):
                         brand_text= await brand_element.nth(i).text_content()
-                        if brand_text and brand_text.xtrip():
+                        if brand_text and brand_text.strip():
                             brand_names.append(brand_text.strip())
                     brand_name= "/".join(brand_names)
                 else:
