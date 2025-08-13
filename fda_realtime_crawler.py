@@ -71,7 +71,9 @@ async def crawl_incremental_links():
 
         try:
             print("🌐 FDA 사이트 접속 (필터링 없이)...")
-            await page.goto("https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/")
+            response=await page.goto("https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/")
+            print(f"📊 응답 상태: {response.status}")
+            print(f"🌐 최종 URL: {response.url}")   
             await page.wait_for_load_state('networkidle')
             print("✅ 페이지 로딩 완료")
             
