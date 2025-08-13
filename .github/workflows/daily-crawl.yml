@@ -53,6 +53,13 @@ jobs:
     - name: Create data directory
       run: |
         mkdir -p ./data
+
+    - name: Upload debug screenshot
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: debug-screenshot
+        path: debug_page.png
         
     - name: Download existing databases (if any)
       continue-on-error: true
