@@ -49,8 +49,13 @@ async def crawl_incremental_links():
         page = await browser.new_page()
 
         await page.goto("https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/")
-        await page.locator("#edit-field-regulated-product-field").select_option(value="2323")
-        await page.wait_for_load_state('networkidle')
+        try:
+            await page.wait_for_selector("#edit-field-regulated-product-field", timeout=10000)
+            await page.locator("#edit-field-regulated-product-field").select_option(value="2323")
+            await page.wait_for_load_state('networkidle')
+            print("✅ Food & Beverages 필터 적용됨")
+        except Exception as e:
+            print(f"⚠️ 필터 적용 실패, 전체 데이터에서 크롤링: {e}")
 
         base_url = "https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/"
         all_brand_urls = []
