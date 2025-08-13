@@ -11,50 +11,50 @@ from db_utils import save_to_sqlite, save_to_chromadb
 
 def get_latest_date_from_db():
     """SQLite DB에서 가장 최신 날짜 조회"""
-    db_path = "./data/fda_recalls.db"
-    if not os.path.exists(db_path):
-        print("📋 DB 파일이 존재하지 않음")
-        return None
-        
-    try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        
-        # 🆕 내림차순 정렬해서 가장 최신 데이터 1개 조회
-        cursor.execute("""
-            SELECT fda_publish_date 
-            FROM recalls 
-            WHERE fda_publish_date IS NOT NULL 
-            ORDER BY fda_publish_date DESC 
-            LIMIT 1
-        """)
-        
-        result = cursor.fetchone()
-        conn.close()
-        
-        if result and result[0]:
-            latest_date = result[0]
-            print(f"📊 DB에서 조회된 최신 날짜: {latest_date}")
-            
-            # 이미 YYYY-MM-DD 형식이면 그대로 반환
-            if len(latest_date) == 10 and latest_date.count('-') == 2:
-                return latest_date
-            
-            # 다른 형식이면 변환 시도
-            try:
-                parsed_date = datetime.strptime(latest_date, "%Y-%m-%d")
-                return parsed_date.strftime("%Y-%m-%d")
-            except:
-                print(f"⚠️ 날짜 형식 변환 실패: {latest_date}")
-                return latest_date  # 원본 그대로 반환
-        else:
-            print("📋 DB에 데이터가 없음")
-            return None
-        
-    except Exception as e:
-        print(f"DB 최신 날짜 조회 오류: {e}")
-        return None
+    db_paths_to_try = [
+        "./data/fda_recalls.db",
+        "/data/fda_recalls.db", 
+        "data/fda_recalls.db",
+        os.path.join(os.getcwd(), "data", "fda_recalls.db")
+    ]
     
+    for db_path in db_paths_to_try:
+        print(f"🔍 시도 중: {db_path}")
+        
+        if not os.path.exists(db_path):
+            print(f"❌ 파일 없음: {db_path}")
+            continue
+            
+        file_size = os.path.getsize(db_path)
+        print(f"📏 파일 크기: {file_size} bytes")
+        
+        try:
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            
+            # 테이블 확인
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+            tables = cursor.fetchall()
+            print(f"📊 테이블: {tables}")
+            
+            if ('recalls',) in tables:
+                cursor.execute("SELECT fda_publish_date FROM recalls ORDER BY fda_publish_date DESC LIMIT 1")
+                result = cursor.fetchone()
+                conn.close()
+                
+                if result and result[0]:
+                    print(f"✅ 최신 날짜 조회 성공: {result[0]}")
+                    return result[0]
+            
+            conn.close()
+            
+        except Exception as e:
+            print(f"💥 DB 연결 오류 ({db_path}): {e}")
+            continue
+    
+    print("❌ 모든 경로에서 DB 접근 실패")
+    return None
+
 
 async def crawl_incremental_links():
     async with async_playwright() as p:
