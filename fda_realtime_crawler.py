@@ -29,7 +29,7 @@ async def crawl_incremental_links():
         for i in range(4):  # 0,1,2,3일 전
             date_obj = today - timedelta(days=i)
             # FDA 사이트 날짜 형식에 맞춤 (예: "08/12/2025")
-            target_dates.append(date_obj.strftime("%m/%d/%Y"))
+            target_dates.append(date_obj.strftime("%Y-%m-%d"))
         
         print(f"🎯 목표 날짜 범위: {target_dates}")
         
