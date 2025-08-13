@@ -47,182 +47,203 @@ async def crawl_incremental_links():
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True,
-            args=['--no-sandbox', '--disable-dev-shm-usage']  # 이 옵션들이 필요
+            args=['--no-sandbox', '--disable-dev-shm-usage']
         )
         page = await browser.new_page()
 
+        # 🆕 User-Agent 추가 (브라우저 위장)
+        await page.set_extra_http_headers({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        })
+
         try:
+            print("🌐 FDA 사이트 접속 (필터링 없이)...")
             await page.goto("https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/")
+            await page.wait_for_load_state('networkidle')
+            print("✅ 페이지 로딩 완료")
             
-            # 🆕 더 오래 기다리고 디버깅 정보 추가
-            print("📍 페이지 로딩 완료, 요소 찾는 중...")
-            
-            # 🆕 페이지 소스 일부 출력 (디버깅용)
-            content = await page.content()
-            if "edit-field-regulated-product-field" in content:
-                print("✅ 셀렉터가 HTML에 존재함")
-            else:
-                print("❌ 셀렉터가 HTML에 없음")
-            
-            # 🆕 더 긴 대기 시간과 다양한 대기 조건
-            selectors_to_try = [
-                "#edit-field-regulated-product-field",
-                "select[name='field_regulated_product_field']", 
-                "[data-drupal-selector*='regulated-product']",
-                "select:has(option[value='2323'])",
-                "select[id*='regulated-product']"  # 추가
-            ]
-            
-            dropdown_found = False
-            for selector in selectors_to_try:
-                try:
-                    print(f"🔍 시도 중: {selector}")
-                    # 🆕 더 긴 대기 시간
-                    await page.wait_for_selector(selector, timeout=30000)
-                    # 🆕 요소가 보이는지 확인
-                    await page.wait_for_selector(selector, state="visible", timeout=10000)
-                    
-                    await page.locator(selector).select_option(value="2323")
-                    await page.wait_for_load_state('networkidle')
-                    print(f"✅ Food & Beverages 필터 성공: {selector}")
-                    dropdown_found = True
-                    break
-                except Exception as e:
-                    print(f"❌ 시도 실패: {selector} - {str(e)}")
-                    continue
-                
         except Exception as e:
-            print(f"💥 페이지 로딩 실패 - 크롤링 중단: {e}")
+            print(f"💥 페이지 로딩 실패: {e}")
             return []
 
         base_url = "https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/"
         all_brand_urls = []
-        current_page_count = 1  # 페이지 번호 추가
+        current_page_count = 1
 
         latest_db_date = get_latest_date_from_db()
         print(f"📊 DB 최신 날짜: {latest_db_date}")
-
-        today = datetime.now()
-        target_dates = []
-        for i in range(4):  # 0,1,2,3일 전
-            date_obj = today - timedelta(days=i)
-            # FDA 사이트 날짜 형식에 맞춤 (예: "08/12/2025")
-            target_dates.append(date_obj.strftime("%Y-%m-%d"))
         
-        print(f"🎯 목표 날짜 범위: {target_dates}")
-        
-        # 기존 while True 루프 내부 수정:
         max_pages = 10  # 안전장치
         while current_page_count <= max_pages:
             print(f"현재 {current_page_count}페이지 처리 중...")
             
-            # 테이블 존재 확인
-            try:
-                await page.wait_for_selector("table tbody tr", timeout=15000)
-            except Exception as e:
-                print(f"⚠️ 테이블을 찾을 수 없음: {e}")
+            # 🆕 다양한 테이블 셀렉터 시도
+            table_selectors = [
+                "table tbody tr",
+                ".view-content .views-row", 
+                "table tr",
+                ".views-table tbody tr"
+            ]
+            
+            rows_found = False
+            for table_selector in table_selectors:
+                try:
+                    await page.wait_for_selector(table_selector, timeout=15000)
+                    rows = await page.locator(table_selector).all()
+                    if len(rows) > 0:
+                        print(f"✅ 테이블 발견: {len(rows)}개 행 ({table_selector})")
+                        rows_found = True
+                        break
+                except:
+                    continue
+            
+            if not rows_found:
+                print("⚠️ 테이블을 찾을 수 없음 - 종료")
                 break
             
-            # ⭐ 핵심 변경: 날짜와 링크를 동시에 수집
-            date_elements = await page.locator("td:nth-child(1)").all()  # 날짜
-            link_elements = await page.locator("td:nth-child(2) a").all()  # 링크
+            # 🆕 조건부 데이터 수집
+            try:
+                # 날짜, 링크, Product Type 동시 수집
+                date_elements = await page.locator("td:nth-child(1)").all()  # 날짜
+                link_elements = await page.locator("td:nth-child(2) a").all()  # 링크  
+                product_type_elements = await page.locator("td:nth-child(4)").all()  # Product Type
+                
+                print(f"📊 발견된 요소: 날짜 {len(date_elements)}개, 링크 {len(link_elements)}개, 제품타입 {len(product_type_elements)}개")
+                
+            except Exception as e:
+                print(f"⚠️ 요소 수집 실패: {e}")
+                break
             
-            page_has_target_dates = False
-            consecutive_misses = 0
-            found_existing_data = False
+            page_has_new_data = False
+            should_break = False
             
-            for i, (date_elem, link_elem) in enumerate(zip(date_elements, link_elements)):
+            # 🎯 조건부 수집 로직
+            for i in range(min(len(date_elements), len(link_elements), len(product_type_elements))):
                 try:
-                    date_text = await date_elem.text_content()
+                    # 날짜 추출
+                    date_text = await date_elements[i].text_content()
                     date_text = date_text.strip()
                     
-                    # 🔍 디버깅: 실제 추출된 날짜 확인
-                    print(f"  📅 추출된 날짜 #{i}: '{date_text}'")
-                    
-                    # ISO 형식에서 날짜 부분만 추출
+                    # 날짜 변환
+                    date_only = None
                     if 'T' in date_text:
-                        date_only = date_text.split('T')[0]  # ISO 형식 처리
+                        date_only = date_text.split('T')[0]
                     elif '/' in date_text:
-                        # MM/dd/yyyy 형식을 yyyy-MM-dd로 변환
                         try:
                             parsed_date = datetime.strptime(date_text, "%m/%d/%Y")
                             date_only = parsed_date.strftime("%Y-%m-%d")
-                            print(f"  🔄 변환된 날짜: '{date_only}'")
                         except:
                             date_only = date_text
-                            print(f"  ⚠️ 날짜 변환 실패: '{date_text}'")
-                    else:
+                    elif '-' in date_text and len(date_text) == 10:
                         date_only = date_text
-
-                    print(f"  📅 최종 날짜: '{date_only}'")
+                    else:
+                        continue  # 날짜 형식을 파싱할 수 없으면 스킵
                     
-                    # 🆕 기존 DB 최신 날짜와 비교
+                    print(f"  📅 #{i}: 날짜 '{date_only}'")
+                    
+                    # 🚨 DB 최신 날짜와 비교 (더 오래된 데이터면 중단)
                     if latest_db_date and date_only:
                         try:
                             current_date_obj = datetime.strptime(date_only, "%Y-%m-%d")
                             latest_date_obj = datetime.strptime(latest_db_date, "%Y-%m-%d")
                             
                             if current_date_obj <= latest_date_obj:
-                                print(f"📊 기존 DB 날짜 도달: {date_only} (DB 최신: {latest_db_date})")
-                                found_existing_data = True
+                                print(f"📊 기존 DB 날짜 도달: {date_only} (DB 최신: {latest_db_date}) - 중단")
+                                should_break = True
                                 break
-                        except:
-                            print(f"  ⚠️ 날짜 비교 오류: {date_only}")
+                        except Exception as e:
+                            print(f"  ⚠️ 날짜 비교 오류: {e}")
                     
-                    # 목표 날짜 범위 확인
-                    if date_only in target_dates:
-                        url = await link_elem.get_attribute("href")
-                        brand_name = await link_elem.text_content()
+                    # Product Type 확인
+                    product_type_text = await product_type_elements[i].text_content()
+                    product_type_text = product_type_text.strip().lower()
+                    
+                    print(f"  🏷️ #{i}: 제품타입 '{product_type_text[:50]}...'")
+                    
+                    # 🎯 Food & Beverages 정확한 조건 확인
+                    # 콤마로 분리해서 첫 번째가 "Food & Beverages"인지 확인
+                    product_parts = product_type_text.split(',')
+                    first_part = product_parts[0].strip()
+                    
+                    is_food_beverage = first_part.lower() == "food & beverages"
+                    
+                    print(f"  🔍 #{i}: 첫번째 부분 '{first_part}' → {'✅' if is_food_beverage else '❌'}")
+                    
+                    if is_food_beverage:
+                        # URL 수집
+                        url = await link_elements[i].get_attribute("href")
+                        brand_name = await link_elements[i].text_content()
                         full_url = urljoin(base_url, url)
-                        all_brand_urls.append({"name": brand_name, "url": full_url})
-                        page_has_target_dates = True
-                        consecutive_misses = 0
-                        print(f"  ✅ 수집: {date_only} - {brand_name}")
+                        
+                        all_brand_urls.append({
+                            "name": brand_name.strip(), 
+                            "url": full_url,
+                            "date": date_only,
+                            "product_type": product_type_text
+                        })
+                        page_has_new_data = True
+                        print(f"  ✅ 수집: {date_only} - {brand_name.strip()}")
                     else:
-                        consecutive_misses += 1
+                        print(f"  ⏭️ 스킵: Food & Beverages 아님")
                         
                 except Exception as e:
                     print(f"  ⚠️ 항목 {i} 처리 오류: {e}")
-                    consecutive_misses += 1
+                    continue
             
-            # 🆕 조기 종료 조건들
-            if found_existing_data:
+            # 중단 조건 확인
+            if should_break:
                 print(f"🔚 기존 데이터 도달로 크롤링 종료 (페이지 {current_page_count})")
                 break
-                
-            if not page_has_target_dates and consecutive_misses > 5:
-                print(f"🔚 페이지 {current_page_count}에서 목표 날짜 없음 - 크롤링 종료")
-                break
-
+            
+            if not page_has_new_data:
+                print(f"🔚 페이지 {current_page_count}에서 새로운 Food & Beverages 데이터 없음")
+                # 다음 페이지도 확인해보기 위해 계속 진행
+            
+            # 다음 페이지 이동
             try:
-                next_button = page.locator("a[rel='next']")
-                if await next_button.count() == 0:
+                next_selectors = [
+                    "a[rel='next']",
+                    ".pager-next a",
+                    ".pagination .next a",
+                    "a:has-text('Next')",
+                    "a:has-text('›')"
+                ]
+                
+                next_found = False
+                for next_selector in next_selectors:
+                    try:
+                        next_button = page.locator(next_selector)
+                        if await next_button.count() > 0:
+                            await next_button.click()
+                            await page.wait_for_load_state('networkidle')
+                            current_page_count += 1
+                            next_found = True
+                            print(f"  ➡️ 다음 페이지로 이동 ({current_page_count})")
+                            break
+                    except:
+                        continue
+                
+                if not next_found:
                     print("🔚 다음 페이지 없음 - 종료")
                     break
-                await next_button.click()
-                await page.wait_for_load_state('networkidle')
-                current_page_count += 1
+                    
             except Exception as e:
                 print(f"🔚 페이지 이동 실패 - 종료: {e}")
                 break
         
-        # 중복 제거 및 최종 결과
-        seen_urls = set()
+        # 결과 정리
         unique_urls = []
-        duplicate_count = 0
+        seen_urls = set()
         
         for item in all_brand_urls:
             if item["url"] not in seen_urls:
                 seen_urls.add(item["url"])
                 unique_urls.append(item)
-            else:
-                duplicate_count += 1
         
         print(f"\n📊 최종 결과:")
         print(f"총 처리 페이지: {current_page_count}개")
-        print(f"중복 제거 전: {len(all_brand_urls)}개")
+        print(f"Food & Beverages 데이터: {len(all_brand_urls)}개")
         print(f"중복 제거 후: {len(unique_urls)}개")
-        print(f"중복된 항목: {duplicate_count}개")
         
         await browser.close()
         return unique_urls
