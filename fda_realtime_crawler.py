@@ -89,6 +89,21 @@ async def crawl_incremental_links():
         max_pages = 10  # 안전장치
         while current_page_count <= max_pages:
             print(f"현재 {current_page_count}페이지 처리 중...")
+
+            print("🔍 페이지 구조 디버깅...")
+
+            # 페이지 소스 일부 출력
+            content = await page.content()
+            print(f"📄 페이지 크기: {len(content)} 문자")
+
+            # td 요소 확인
+            td_count = await page.locator("td").count()
+            table_count = await page.locator("table").count()
+            print(f"📊 table: {table_count}개, td: {td_count}개")
+
+            # 첫 번째 페이지 스크린샷 저장 (옵션)
+            await page.screenshot(path="debug_page.png")
+            print("📸 페이지 스크린샷 저장됨")
             
             # 🆕 조건부 데이터 수집
             try:
