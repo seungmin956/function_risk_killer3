@@ -131,13 +131,30 @@ async def crawl_incremental_links():
                     print(f"  📅 #{i}: 날짜 '{date_only}'")
                     
                     # 🚨 DB 최신 날짜와 비교 (더 오래된 데이터면 중단)
+                    # if latest_db_date and date_only:
+                    #     try:
+                    #         current_date_obj = datetime.strptime(date_only, "%Y-%m-%d")
+                    #         latest_date_obj = datetime.strptime(latest_db_date, "%Y-%m-%d")
+                            
+                    #         if current_date_obj <= latest_date_obj:
+                    #             print(f"📊 기존 DB 날짜 도달: {date_only} (DB 최신: {latest_db_date}) - 중단")
+                    #             should_break = True
+                    #             break
+                    #     except Exception as e:
+                    #         print(f"  ⚠️ 날짜 비교 오류: {e}")
+
                     if latest_db_date and date_only:
                         try:
                             current_date_obj = datetime.strptime(date_only, "%Y-%m-%d")
                             latest_date_obj = datetime.strptime(latest_db_date, "%Y-%m-%d")
                             
-                            if current_date_obj <= latest_date_obj:
-                                print(f"📊 기존 DB 날짜 도달: {date_only} (DB 최신: {latest_db_date}) - 중단")
+                            # ❌ 기존: DB 날짜 이전이면 중단
+                            # if current_date_obj <= latest_date_obj:
+
+                            # ✅ 테스트용: DB 날짜 -3일 이전이면 중단
+                            test_cutoff_date = latest_date_obj - timedelta(days=3)
+                            if current_date_obj <= test_cutoff_date:
+                                print(f"📊 테스트 종료 조건 도달: {date_only} (DB-3일: {test_cutoff_date.strftime('%Y-%m-%d')}) - 중단")
                                 should_break = True
                                 break
                         except Exception as e:
