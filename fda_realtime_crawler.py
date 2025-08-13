@@ -13,35 +13,48 @@ def get_latest_date_from_db():
     """SQLite DB에서 가장 최신 날짜 조회"""
     db_path = "./data/fda_recalls.db"
     if not os.path.exists(db_path):
+        print("📋 DB 파일이 존재하지 않음")
         return None
         
     try:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         
-        # 가장 최신 FDA 발표일 조회
+        # 🆕 내림차순 정렬해서 가장 최신 데이터 1개 조회
         cursor.execute("""
-            SELECT MAX(fda_publish_date) as latest_date 
+            SELECT fda_publish_date 
             FROM recalls 
-            WHERE fda_publish_date IS NOT NULL
+            WHERE fda_publish_date IS NOT NULL 
+            ORDER BY fda_publish_date DESC 
+            LIMIT 1
         """)
         
         result = cursor.fetchone()
-        latest_date = result[0] if result and result[0] else None
         conn.close()
         
-        if latest_date:
-            # YYYY-MM-DD 형식으로 변환
+        if result and result[0]:
+            latest_date = result[0]
+            print(f"📊 DB에서 조회된 최신 날짜: {latest_date}")
+            
+            # 이미 YYYY-MM-DD 형식이면 그대로 반환
+            if len(latest_date) == 10 and latest_date.count('-') == 2:
+                return latest_date
+            
+            # 다른 형식이면 변환 시도
             try:
                 parsed_date = datetime.strptime(latest_date, "%Y-%m-%d")
                 return parsed_date.strftime("%Y-%m-%d")
             except:
-                return None
-        return None
+                print(f"⚠️ 날짜 형식 변환 실패: {latest_date}")
+                return latest_date  # 원본 그대로 반환
+        else:
+            print("📋 DB에 데이터가 없음")
+            return None
         
     except Exception as e:
         print(f"DB 최신 날짜 조회 오류: {e}")
         return None
+    
 
 async def crawl_incremental_links():
     async with async_playwright() as p:
