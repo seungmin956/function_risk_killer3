@@ -190,14 +190,15 @@ async def crawl_incremental_links():
                     print(f"  ⚠️ 항목 {i} 처리 오류: {e}")
                     continue
             
-            # 중단 조건 확인
+            # 🆕 페이지별 조건 확인 후 다음 페이지 결정
             if should_break:
-                print(f"🔚 기존 데이터 도달로 크롤링 종료 (페이지 {current_page_count})")
+                print(f"🔚 기존 DB 날짜 도달로 크롤링 종료 (페이지 {current_page_count})")
                 break
             
             if not page_has_new_data:
-                print(f"🔚 페이지 {current_page_count}에서 새로운 Food & Beverages 데이터 없음")
-                # 다음 페이지도 확인해보기 위해 계속 진행
+                print(f"💡 페이지 {current_page_count}에서 새로운 Food & Beverages 데이터 없음")
+                print(f"🔚 더 이상 진행할 필요 없음 - 크롤링 종료")
+                break  # 🆕 새로운 데이터가 없으면 바로 종료
             
             # 다음 페이지 이동
             try:
