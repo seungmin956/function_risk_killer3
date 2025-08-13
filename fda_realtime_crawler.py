@@ -72,6 +72,7 @@ async def crawl_incremental_links():
             '--no-first-run'
         ]
     )
+        page = await browser.new_page()  
 
         # 추가: 자동화 감지 속성 제거
         await page.add_init_script("""
