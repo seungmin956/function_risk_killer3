@@ -37,6 +37,3 @@ Thumbs.db
 # 데이터 폴더는 추적 (LFS 사용)
 !data/
 !data/**
-
-# GitHub Actions 관련
-.github/workflows/
