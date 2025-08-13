@@ -59,10 +59,26 @@ def get_latest_date_from_db():
 async def crawl_incremental_links():
     async with async_playwright() as p:
         browser = await p.chromium.launch(
-            headless=True,
-            args=['--no-sandbox', '--disable-dev-shm-usage']
-        )
-        page = await browser.new_page()
+        headless=True,
+        args=[
+            '--no-sandbox', 
+            '--disable-dev-shm-usage',
+            '--disable-blink-features=AutomationControlled',  # 핵심!
+            '--disable-web-security',
+            '--disable-features=VizDisplayCompositor',
+            '--disable-automation',
+            '--disable-browser-side-navigation',
+            '--disable-dev-shm-usage',
+            '--no-first-run'
+        ]
+    )
+
+        # 추가: 자동화 감지 속성 제거
+        await page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined,
+            });
+        """)
 
         # 🆕 User-Agent 추가 (브라우저 위장)
         await page.set_extra_http_headers({
