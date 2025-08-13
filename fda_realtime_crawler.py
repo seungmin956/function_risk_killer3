@@ -94,13 +94,17 @@ async def crawl_incremental_links():
         })
 
         try:
-            print("🌐 FDA 사이트 접속 (필터링 없이)...")
-            response=await page.goto("https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/")
-            print(f"📊 응답 상태: {response.status}")
-            print(f"🌐 최종 URL: {response.url}")   
-            await page.wait_for_load_state('networkidle')
-            print("✅ 페이지 로딩 완료")
+            print("🏠 FDA 메인 페이지부터 접근...")
+            await page.goto("https://www.fda.gov/")
+            await page.wait_for_timeout(10000)  # 10초 대기
             
+            print("📂 Safety 섹션으로 이동...")
+            await page.goto("https://www.fda.gov/safety/")
+            await page.wait_for_timeout(5000)
+            
+            print("🎯 최종 목적지...")
+            response = await page.goto("https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/")
+                    
         except Exception as e:
             print(f"💥 페이지 로딩 실패: {e}")
             return []
