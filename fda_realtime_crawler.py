@@ -9,7 +9,39 @@ from playwright.async_api import async_playwright
 from urllib.parse import urljoin
 from db_utils import save_to_sqlite, save_to_chromadb
 
-
+def get_latest_date_from_db():
+    """SQLite DB에서 가장 최신 날짜 조회"""
+    db_path = "./data/fda_recalls.db"
+    if not os.path.exists(db_path):
+        return None
+        
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        # 가장 최신 FDA 발표일 조회
+        cursor.execute("""
+            SELECT MAX(fda_publish_date) as latest_date 
+            FROM recalls 
+            WHERE fda_publish_date IS NOT NULL
+        """)
+        
+        result = cursor.fetchone()
+        latest_date = result[0] if result and result[0] else None
+        conn.close()
+        
+        if latest_date:
+            # YYYY-MM-DD 형식으로 변환
+            try:
+                parsed_date = datetime.strptime(latest_date, "%Y-%m-%d")
+                return parsed_date.strftime("%Y-%m-%d")
+            except:
+                return None
+        return None
+        
+    except Exception as e:
+        print(f"DB 최신 날짜 조회 오류: {e}")
+        return None
 
 async def crawl_incremental_links():
     async with async_playwright() as p:
@@ -23,6 +55,9 @@ async def crawl_incremental_links():
         base_url = "https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/"
         all_brand_urls = []
         current_page_count = 1  # 페이지 번호 추가
+
+        latest_db_date = get_latest_date_from_db()
+        print(f"📊 DB 최신 날짜: {latest_db_date}")
 
         today = datetime.now()
         target_dates = []
@@ -43,29 +78,67 @@ async def crawl_incremental_links():
             
             page_has_target_dates = False
             consecutive_misses = 0
+            found_existing_data = False
             
             for i, (date_elem, link_elem) in enumerate(zip(date_elements, link_elements)):
                 try:
                     date_text = await date_elem.text_content()
                     date_text = date_text.strip()
                     
-                    # 날짜가 목표 범위에 있는지 확인
-                    if date_text in target_dates:
+                    # 🔍 디버깅: 실제 추출된 날짜 확인
+                    print(f"  📅 추출된 날짜 #{i}: '{date_text}'")
+                    
+                    # ISO 형식에서 날짜 부분만 추출
+                    if 'T' in date_text:
+                        date_only = date_text.split('T')[0]  # ISO 형식 처리
+                    elif '/' in date_text:
+                        # MM/dd/yyyy 형식을 yyyy-MM-dd로 변환
+                        try:
+                            parsed_date = datetime.strptime(date_text, "%m/%d/%Y")
+                            date_only = parsed_date.strftime("%Y-%m-%d")
+                            print(f"  🔄 변환된 날짜: '{date_only}'")
+                        except:
+                            date_only = date_text
+                            print(f"  ⚠️ 날짜 변환 실패: '{date_text}'")
+                    else:
+                        date_only = date_text
+
+                    print(f"  📅 최종 날짜: '{date_only}'")
+                    
+                    # 🆕 기존 DB 최신 날짜와 비교
+                    if latest_db_date and date_only:
+                        try:
+                            current_date_obj = datetime.strptime(date_only, "%Y-%m-%d")
+                            latest_date_obj = datetime.strptime(latest_db_date, "%Y-%m-%d")
+                            
+                            if current_date_obj <= latest_date_obj:
+                                print(f"📊 기존 DB 날짜 도달: {date_only} (DB 최신: {latest_db_date})")
+                                found_existing_data = True
+                                break
+                        except:
+                            print(f"  ⚠️ 날짜 비교 오류: {date_only}")
+                    
+                    # 목표 날짜 범위 확인
+                    if date_only in target_dates:
                         url = await link_elem.get_attribute("href")
                         brand_name = await link_elem.text_content()
                         full_url = urljoin(base_url, url)
                         all_brand_urls.append({"name": brand_name, "url": full_url})
                         page_has_target_dates = True
                         consecutive_misses = 0
-                        print(f"  ✅ 수집: {date_text} - {brand_name}")
+                        print(f"  ✅ 수집: {date_only} - {brand_name}")
                     else:
                         consecutive_misses += 1
                         
                 except Exception as e:
                     print(f"  ⚠️ 항목 {i} 처리 오류: {e}")
                     consecutive_misses += 1
-                    
-            # 조기 종료 조건: 한 페이지에 목표 날짜가 하나도 없고, 연속 실패가 많으면
+            
+            # 🆕 조기 종료 조건들
+            if found_existing_data:
+                print(f"🔚 기존 데이터 도달로 크롤링 종료 (페이지 {current_page_count})")
+                break
+                
             if not page_has_target_dates and consecutive_misses > 5:
                 print(f"🔚 페이지 {current_page_count}에서 목표 날짜 없음 - 크롤링 종료")
                 break
@@ -325,3 +398,6 @@ async def main_from_saved_urls(json_file):
 
     print(f"🎉 총 {len(all_results)}개 데이터 크롤링 완료!")
     print(f"❌ 실패: {len(failed_urls)}개")
+
+if __name__ == "__main__":
+    asyncio.run(main())
