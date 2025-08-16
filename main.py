@@ -1,9 +1,9 @@
-#main.py
+# main.py
 import sys
 
-# SQLite 버전 문제 해결 (ChromaDB용) - 더 강력한 방법
+# SQLite 버전 문제 해결 (ChromaDB용)
 try:
-    # pysqlite3를 sqlite3로 완전히 대체
+    # pysqlite3를 sqlite3로 대체
     import pysqlite3
     sys.modules['sqlite3'] = pysqlite3
     
@@ -136,92 +136,21 @@ button[kind="secondary"]:focus {{
 
 # 탭 내용 표시
 if st.session_state.active_tab == 'market':
-    try:
-        from components.tab_tableau import create_market_dashboard
-        create_market_dashboard()
-    except ImportError:
-        st.error("시장 동향 모듈을 불러올 수 없습니다.")
-    except Exception as e:
-        st.error(f"시장 동향 로딩 중 오류 발생: {str(e)}")
+    from components.tab_tableau import create_market_dashboard
+    create_market_dashboard()
 
 elif st.session_state.active_tab == 'news':
-    try:
-        from components.tab_news import show_news
-        show_news()
-    except ImportError:
-        st.error("뉴스 모듈을 불러올 수 없습니다.")
-    except Exception as e:
-        st.error(f"뉴스 로딩 중 오류 발생: {str(e)}")
+    from components.tab_news import show_news
+    show_news()
 
 elif st.session_state.active_tab == 'chatbot':
-    # AI Q&A 챗봇 탭 전용 버튼 스타일
-    # st.markdown("""
-    # <style>
-    # .stButton > button[kind="primary"] {
-    #     background-color: #A8E6CF !important;
-    #     border-color: #A8E6CF !important;
-    #     color: #2C3E50 !important;
-    # }
-    # .stButton > button[kind="primary"]:hover {
-    #     background-color: #7FCDCD !important;
-    #     border-color: #7FCDCD !important;
-    #     color: white !important;
-    # }
-    # </style>
-    # """, unsafe_allow_html=True)
-    
-    try:
-        from components.tab_regulation import show_regulation_chat
-        show_regulation_chat()
-    except ImportError:
-        st.error("규제 챗봇 모듈을 불러올 수 없습니다.")
-    except Exception as e:
-        st.error(f"규제 챗봇 로딩 중 오류 발생: {str(e)}")
+    from components.tab_regulation import show_regulation_chat
+    show_regulation_chat()
 
 elif st.session_state.active_tab == 'risk':
-    # 리스크 검토 탭 전용 버튼 스타일
-    # st.markdown("""
-    # <style>
-    # .stButton > button[kind="primary"] {
-    #     background-color: #FFD93D !important;
-    #     border-color: #FFD93D !important;
-    #     color: #2C3E50 !important;
-    # }
-    # .stButton > button[kind="primary"]:hover {
-    #     background-color: #FFC312 !important;
-    #     border-color: #FFC312 !important;
-    # }
-    # </style>
-    # """, unsafe_allow_html=True)
-    
-    try:
-        from components.tab_recall import show_recall_chat
-        show_recall_chat()
-    except ImportError:
-        st.error("리콜 모듈을 불러올 수 없습니다.")
-    except Exception as e:
-        st.error(f"리콜 로딩 중 오류 발생: {str(e)}")
+    from components.tab_recall import show_recall_chat
+    show_recall_chat()
 
 elif st.session_state.active_tab == 'summary':
-    # 기획안 요약 도우미 탭 전용 버튼 스타일
-    # st.markdown("""
-    # <style>
-    # .stButton > button[kind="primary"] {
-    #     background-color: #5DADE2 !important;
-    #     border-color: #5DADE2 !important;
-    #     color: white !important;
-    # }
-    # .stButton > button[kind="primary"]:hover {
-    #     background-color: #357ABD !important;
-    #     border-color: #357ABD !important;
-    # }
-    # </style>
-    # """, unsafe_allow_html=True)
-    
-    try:
-        from components.tab_export import show_export_helper
-        show_export_helper()
-    except ImportError:
-        st.error("내보내기 도우미 모듈을 불러올 수 없습니다.")
-    except Exception as e:
-        st.error(f"내보내기 도우미 로딩 중 오류 발생: {str(e)}")
+    from components.tab_export import show_export_helper
+    show_export_helper()

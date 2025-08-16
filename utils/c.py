@@ -1,4 +1,4 @@
-## utils/c.py (v0)
+# utils/c.py
 
 import requests
 import json
@@ -24,8 +24,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("risk_federal_changes.log"),
-        logging.StreamHandler()
+        logging.StreamHandler()  # 파일 핸들러 제거, 콘솔에만 출력
     ]
 )
 logger = logging.getLogger()
@@ -124,7 +123,7 @@ def _translate_chunk(text, max_retries=3):
 def get_date_one_month_ago():
     """정확히 한 달 전 날짜 반환"""
     today = datetime.now()
-    one_month_ago = today - timedelta(days=90)  # 30일을 한 달로 간주
+    one_month_ago = today - timedelta(days=30)  # 30일을 한 달로 간주
     return one_month_ago.strftime("%Y-%m-%d")
 
 def is_valid_regulation_content(content):
@@ -136,26 +135,20 @@ def is_valid_regulation_content(content):
     strong_indicators = [
         'part ', 'section ', 'subpart', '§', 'cfr',
         'shall', 'must', 'may not', 'prohibited',
-        'required', 'defined as', 'means', 'includes'
-    ]
+        'required', 'defined as', 'means', 'includes']
     
     # 메타 정보를 나타내는 지표들 (이게 많으면 규정 내용이 아님)
     meta_indicators = [
         'ecfr에서 가져온', '권위 있는 정보', '비공식적',
         '최신 정보', '개정되었습니다', '역사적 버전',
-        '작성 사이트', 'browser support', 'feedback'
-    ]
+        '작성 사이트', 'browser support', 'feedback']
     
     content_lower = content.lower()
     
-    # 강한 지표 개수 세기
-    strong_count = sum(1 for indicator in strong_indicators if indicator in content_lower)
+    strong_count = sum(1 for indicator in strong_indicators if indicator in content_lower) # 강한 지표 개수 세기
+    meta_count = sum(1 for indicator in meta_indicators if indicator in content_lower) # 메타 지표 개수 세기
     
-    # 메타 지표 개수 세기
-    meta_count = sum(1 for indicator in meta_indicators if indicator in content_lower)
-    
-    # 규정 내용으로 판단하는 조건
-    return strong_count >= 3 and meta_count <= 2
+    return strong_count >= 3 and meta_count <= 2 # 규정 내용으로 판단하는 조건
 
 def extract_regulation_from_full_page(soup, part_num):
     """전체 페이지에서 규정 내용만 추출하는 마지막 수단"""
@@ -748,7 +741,7 @@ def main():
     
     # 결과가 없으면 종료
     if not all_data:
-        logger.error("데이터를 가져오지 못했습니다. 로그 파일을 확인하세요.")
+        logger.error("데이터를 가져오지 못했습니다. 콘솔 로그를 확인하세요.")
         return
     
     # 날짜순으로 정렬

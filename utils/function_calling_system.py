@@ -9,6 +9,7 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_core.tools import tool
+from functools import lru_cache
 from utils.prompts.recall_prompts import RecallPrompts
 
 load_dotenv()
@@ -108,6 +109,7 @@ def parse_relative_dates(period_text: str) -> str:
     print(f"⚠️ 날짜 인식 실패: '{period_text}' → 기본값 {current_year}년 사용")
     return str(current_year)
 
+@lru_cache(maxsize=512) # 동일 키워드가 반복 호출될 때 속도/비용 줄일 수 있음
 def translate_to_english(korean_text: str) -> str:
     """한국어 텍스트를 영어로 번역하는 함수"""
     from langchain_openai import ChatOpenAI
@@ -136,6 +138,20 @@ def translate_to_english(korean_text: str) -> str:
         # 번역 실패 시 기존 키워드 매핑 사용
         return korean_text
 
+# 상세 오염원/병원체 감지용 헬퍼 추가
+_DETAIL_TERMS = {
+    "salmonella", "리스테리아", "listeria", "listeria monocytogenes",
+    "e. coli", "ecoli", "escherichia", "norovirus", "노로바이러스",
+    "campylobacter", "shigella", "clostridium", "botulinum"
+}
+
+def _looks_like_detail(value: Optional[str]) -> bool:
+    if not value:
+        return False
+    v = value.lower()
+    v_en = translate_to_english(value).lower()
+    return any(k in v or k in v_en for k in _DETAIL_TERMS)
+
 def get_recall_vectorstore():
     """tab_recall.py 호환용 함수"""
     return initialize_recall_vectorstore()
@@ -150,7 +166,7 @@ def _get_system_components():
     
     return _sqlite_conn, _vectorstore, None  
 
-# 🆕 스마트 필드 매핑 함수 (질문 유형에 따른 자동 필드 선택)
+# 스마트 필드 매핑 함수 (질문 유형에 따른 자동 필드 선택)
 def smart_count_recalls(query: str, **filters) -> Dict[str, Any]:
     """
     질문 유형을 분석해서 적절한 필드로 자동 매핑하는 래퍼 함수
@@ -194,14 +210,14 @@ def smart_count_recalls(query: str, **filters) -> Dict[str, Any]:
     # 1. 구체적인 오염물질 감지
     for ko_term, en_term in specific_contaminants.items():
         if ko_term in query or en_term in query_lower:
-            auto_filters["recall_detail"] = ko_term
+            auto_filters["recall_reason_detail"] = ko_term
             break
     
     # 2. 알레르겐 감지 (알레르겐 관련 질문)
     for ko_term, en_term in allergen_keywords.items():
         if ko_term in query or en_term in query_lower:
             if "알레르겐" in query or "allergen" in query_lower:
-                auto_filters["recall_detail"] = f"{ko_term} 알레르겐"
+                auto_filters["recall_reason_detail"] = f"{ko_term} 알레르겐"
             else:
                 auto_filters["keyword"] = ko_term  # 통합 검색
             break
@@ -222,7 +238,7 @@ def smart_count_recalls(query: str, **filters) -> Dict[str, Any]:
     
     return count_recalls(**auto_filters)
 
-# 🆕 스마트 순위 분석 함수 (smart_count_recalls 스타일)
+# 스마트 순위 분석 함수 (smart_count_recalls 스타일)
 def smart_rank_by_field(query: str, limit: int = 10, **filters) -> Dict[str, Any]:
     """
     질문을 분석해서 적절한 필드로 자동 순위 분석
@@ -394,26 +410,37 @@ def calculate_filter_statistics(cursor, include_terms: Optional[List[str]], excl
 # Function Calling 도구들
 # ======================
 
+REASON_CATEGORIES = {
+    "allergens", "illness", "labeling", "contaminants",
+    "microbiological", "foreign material", "quality",
+    "packaging", "undetermined", "other"
+}
+
 @tool
-def count_recalls(company: Optional[str] = None,
-                 product_type: Optional[str] = None,  # food_type → product_type 변경
-                 brand: Optional[str] = None,  # 🆕 브랜드 필터 추가
-                 recall_reason: Optional[str] = None,
-                 recall_detail: Optional[str] = None,  # 🆕 상세 사유 필터 추가
-                 year: Optional[str] = None,
-                 keyword: Optional[str] = None) -> Dict[str, Any]:
+def count_recalls(
+    company: Optional[str] = None,
+    product_type: Optional[str] = None,
+    brand: Optional[str] = None,
+    recall_reason: Optional[str] = None,            # 리콜 대분류(카테고리)
+    recall_reason_detail: Optional[str] = None,     # 리콜 세부 원인(살모넬라 등)
+    year: Optional[str] = None,
+    keyword: Optional[str] = None) -> Dict[str, Any]:
     """리콜 건수를 세는 함수 (SQLite 기반) - 현재 JSON 구조 맞춤"""
-    
+
     sqlite_conn, _, _ = _get_system_components()
-    
     if not sqlite_conn:
         return {"error": "SQLite 데이터베이스 연결 실패"}
-    
+
     try:
+        # LLM이 실수로 recall_reason="Salmonella"처럼 넘겨도 자동 보정
+        if recall_reason and not recall_reason_detail and _looks_like_detail(recall_reason):
+            recall_reason_detail = recall_reason
+            recall_reason = None
+
         sql = "SELECT COUNT(*) as count FROM recalls WHERE 1=1"
         params = []
-        
-        # 🆕 통합 키워드 검색 (모든 주요 필드에서 검색)
+
+        # 통합 키워드 검색 (모든 주요 필드에서 검색)
         if keyword:
             english_keyword = translate_to_english(keyword)
             search_terms = [keyword, english_keyword] if english_keyword != keyword else [keyword]
@@ -431,10 +458,9 @@ def count_recalls(company: Optional[str] = None,
                     LOWER(content) LIKE LOWER(?)
                 )""")
                 params.extend([f"%{term}%"] * 6)
-            
             sql += f" AND ({' OR '.join(search_conditions)})"
-        
-        # 🆕 개별 필터들 (현재 JSON 구조 맞춤)
+				
+				# 개별 필터들 (현재 JSON 구조 맞춤)
         if company:
             english_company = translate_to_english(company)
             company_terms = [company, english_company] if english_company != company else [company]
@@ -443,7 +469,7 @@ def count_recalls(company: Optional[str] = None,
                 company_conditions.append("LOWER(company_name) LIKE LOWER(?)")
                 params.append(f"%{term}%")
             sql += f" AND ({' OR '.join(company_conditions)})"
-            
+
         if brand:
             english_brand = translate_to_english(brand)
             brand_terms = [brand, english_brand] if english_brand != brand else [brand]
@@ -452,7 +478,7 @@ def count_recalls(company: Optional[str] = None,
                 brand_conditions.append("LOWER(brand_name) LIKE LOWER(?)")
                 params.append(f"%{term}%")
             sql += f" AND ({' OR '.join(brand_conditions)})"
-            
+
         if product_type:
             english_product_type = translate_to_english(product_type)
             product_type_terms = [product_type, english_product_type] if english_product_type != product_type else [product_type]
@@ -461,61 +487,62 @@ def count_recalls(company: Optional[str] = None,
                 product_type_conditions.append("LOWER(product_type) LIKE LOWER(?)")
                 params.append(f"%{term}%")
             sql += f" AND ({' OR '.join(product_type_conditions)})"
-            
+
+        # 대분류
         if recall_reason:
             english_recall_reason = translate_to_english(recall_reason)
             recall_reason_terms = [recall_reason, english_recall_reason] if english_recall_reason != recall_reason else [recall_reason]
             recall_reason_conditions = []
             for term in recall_reason_terms:
-                recall_reason_conditions.append("LOWER(recall_reason) LIKE LOWER(?)")
-                params.append(f"%{term}%")
+                recall_reason_conditions.append("LOWER(recall_reason) = LOWER(?)")
+                params.append(term)
             sql += f" AND ({' OR '.join(recall_reason_conditions)})"
-        
-        # 🆕 상세 리콜 사유 검색 (살모넬라, 리스테리아 등 구체적 오염물질)
-        if recall_detail:
-            english_recall_detail = translate_to_english(recall_detail)
-            recall_detail_terms = [recall_detail, english_recall_detail] if english_recall_detail != recall_detail else [recall_detail]
+
+        # 상세 리콜 사유 검색 (살모넬라, 리스테리아 등 구체적 오염물질)
+        if recall_reason_detail:
+            english_recall_detail = translate_to_english(recall_reason_detail)
+            recall_detail_terms = [recall_reason_detail, english_recall_detail] if english_recall_detail != recall_reason_detail else [recall_reason_detail]
             recall_detail_conditions = []
             for term in recall_detail_terms:
                 recall_detail_conditions.append("LOWER(recall_reason_detail) LIKE LOWER(?)")
                 params.append(f"%{term}%")
             sql += f" AND ({' OR '.join(recall_detail_conditions)})"
-            
-        # 날짜 필터 (fda_publish_date 사용)
+
+				# 날짜 필터 (fda_publish_date 사용)
         if year:
-            if len(year) == 4:  # 연도만
+            if len(year) == 4: # 연도만
                 sql += " AND strftime('%Y', fda_publish_date) = ?"
                 params.append(year)
-            elif len(year) == 7:  # YYYY-MM 형태
+            elif len(year) == 7: # YYYY-MM 형태
                 sql += " AND strftime('%Y-%m', fda_publish_date) = ?"
                 params.append(year)
-        
+
         print(f"🔧 SQL 쿼리: {sql}")
         print(f"🔧 파라미터: {params}")
-        
+
         cursor = sqlite_conn.cursor()
         cursor.execute(sql, params)
         result = cursor.fetchone()
-        
+
         return {
             "count": result["count"],
             "filters": {
-                "company": company, 
-                "brand": brand,  # 🆕
+                "company": company,
+                "brand": brand,
                 "product_type": product_type,
-                "recall_reason": recall_reason, 
-                "recall_detail": recall_detail,  # 🆕
-                "year": year, 
+                "recall_reason": recall_reason,
+                "recall_reason_detail": recall_reason_detail,
+                "year": year,
                 "keyword": keyword
             },
             "search_fields": "multiple" if keyword else "specific",
             "query_type": "unified_count",
             "database_fields_used": [
-                "company_name", "brand_name", "product_type", 
+                "company_name", "brand_name", "product_type",
                 "recall_reason", "recall_reason_detail", "fda_publish_date", "content"
             ]
         }
-        
+
     except Exception as e:
         return {"error": f"SQL 카운팅 오류: {e}"}
 
@@ -523,9 +550,9 @@ def count_recalls(company: Optional[str] = None,
 def rank_by_field(field: str, limit: int = 10, 
                  company: Optional[str] = None,
                  product_type: Optional[str] = None,  # food_type → product_type
-                 brand: Optional[str] = None,  # 🆕 브랜드 필터 추가
+                 brand: Optional[str] = None,         # 브랜드 필터
                  year: Optional[str] = None,
-                 keyword: Optional[str] = None) -> Dict[str, Any]:  # 🆕 키워드 필터 추가
+                 keyword: Optional[str] = None) -> Dict[str, Any]:  # 키워드 필터
     """필드별 순위 분석 (현재 JSON 구조 맞춤 + 스마트 매핑)"""
     
     sqlite_conn, _, _ = _get_system_components()
@@ -536,7 +563,7 @@ def rank_by_field(field: str, limit: int = 10,
     try:
         cursor = sqlite_conn.cursor()
         
-        # 🆕 현재 JSON 구조에 맞는 필드 매핑
+        # 현재 JSON 구조에 맞는 필드 매핑
         field_mapping = {
             "company": "company_name",
             "brand": "brand_name", 
@@ -580,7 +607,7 @@ def rank_by_field(field: str, limit: int = 10,
         """
         params = []
         
-        # 🆕 키워드 필터 (여러 필드에서 통합 검색)
+        # 키워드 필터 (여러 필드에서 통합 검색)
         if keyword:
             english_keyword = translate_to_english(keyword)
             search_terms = [keyword, english_keyword] if english_keyword != keyword else [keyword]
@@ -666,10 +693,10 @@ def rank_by_field(field: str, limit: int = 10,
 def get_monthly_trend(months: int = 12,
                      product_type: Optional[str] = None,  # food_type → product_type
                      company: Optional[str] = None,
-                     brand: Optional[str] = None,  # 🆕 브랜드 필터 추가
-                     recall_reason: Optional[str] = None,  # 🆕 리콜 사유 필터 추가
-                     keyword: Optional[str] = None,  # 🆕 키워드 필터 추가
-                     date_field: str = "fda") -> Dict[str, Any]:  # 🆕 날짜 필드 선택
+                     brand: Optional[str] = None,         # 브랜드 필터 추가
+                     recall_reason: Optional[str] = None, # 리콜 사유 필터 추가
+                     keyword: Optional[str] = None,       # 키워드 필터 추가
+                     date_field: str = "fda") -> Dict[str, Any]:  # 날짜 필드 선택
     """월별 리콜 트렌드 분석 (현재 JSON 구조 맞춤 + 다양한 필터 지원)"""
     
     sqlite_conn, _, _ = _get_system_components()
@@ -678,7 +705,7 @@ def get_monthly_trend(months: int = 12,
         return {"error": "SQLite 데이터베이스 연결 실패"}
     
     try:
-        # 🆕 날짜 필드 선택 (FDA 발표일 vs 회사 발표일)
+        # 날짜 필드 선택 (FDA 발표일 vs 회사 발표일)
         if date_field.lower() in ["fda", "fda_publish"]:
             date_column = "fda_publish_date"
         elif date_field.lower() in ["company", "company_announcement"]:
@@ -693,7 +720,7 @@ def get_monthly_trend(months: int = 12,
         """
         params = []
         
-        # 🆕 키워드 통합 검색
+        # 키워드 통합 검색
         if keyword:
             english_keyword = translate_to_english(keyword)
             search_terms = [keyword, english_keyword] if english_keyword != keyword else [keyword]
@@ -776,16 +803,15 @@ def get_monthly_trend(months: int = 12,
         return {"error": f"트렌드 조회 오류: {e}"}
     
 
-
 @tool
 def compare_periods(period1: str, period2: str, 
                    metric: str = "count",
-                   include_reasons: bool = False,  # 사유별 분석 포함
-                   product_type: Optional[str] = None,  # 🆕 제품 유형 필터
-                   company: Optional[str] = None,  # 🆕 회사 필터
-                   brand: Optional[str] = None,  # 🆕 브랜드 필터
-                   keyword: Optional[str] = None,  # 🆕 키워드 필터
-                   date_field: str = "fda") -> Dict[str, Any]:  # 🆕 날짜 필드 선택
+                   include_reasons: bool = False,       # 사유별 분석 포함
+                   product_type: Optional[str] = None,  # 제품 유형 필터
+                   company: Optional[str] = None,       # 회사 필터
+                   brand: Optional[str] = None,         # 브랜드 필터
+                   keyword: Optional[str] = None,       # 키워드 필터
+                   date_field: str = "fda") -> Dict[str, Any]:  # 날짜 필드 선택
     """기간별 비교 분석 함수 (현재 JSON 구조 맞춤 + 다양한 필터 지원)"""
     
     sqlite_conn, _, _ = _get_system_components()
@@ -800,7 +826,7 @@ def compare_periods(period1: str, period2: str,
         
         print(f"🔧 날짜 변환: '{period1}' → {actual_period1}, '{period2}' → {actual_period2}")
         
-        # 🆕 날짜 필드 선택
+        # 날짜 필드 선택
         if date_field.lower() in ["fda", "fda_publish"]:
             date_column = "fda_publish_date"
         elif date_field.lower() in ["company", "company_announcement"]:
@@ -827,7 +853,7 @@ def compare_periods(period1: str, period2: str,
             base_where = f"WHERE {date_filter}"
             base_params = [period]
             
-            # 🆕 추가 필터들 적용
+            # 추가 필터들 적용
             additional_conditions = []
             additional_params = []
             
@@ -885,14 +911,14 @@ def compare_periods(period1: str, period2: str,
                 final_where += " AND " + " AND ".join(additional_conditions)
                 final_params.extend(additional_params)
             
-            # 🆕 메트릭별 쿼리 실행
+            # 메트릭별 쿼리 실행
             if metric == "count":
                 sql = f"SELECT COUNT(*) as value FROM recalls {final_where}"
             elif metric == "companies":
                 sql = f"SELECT COUNT(DISTINCT company_name) as value FROM recalls {final_where} AND company_name IS NOT NULL AND company_name != ''"
-            elif metric == "brands":  # 🆕 브랜드 수 메트릭
+            elif metric == "brands":  # 브랜드 수 메트릭
                 sql = f"SELECT COUNT(DISTINCT brand_name) as value FROM recalls {final_where} AND brand_name IS NOT NULL AND brand_name != ''"
-            elif metric == "product_types":  # 🆕 제품 유형 수 메트릭  
+            elif metric == "product_types":  # 제품 유형 수 메트릭  
                 sql = f"SELECT COUNT(DISTINCT product_type) as value FROM recalls {final_where} AND product_type IS NOT NULL AND product_type != ''"
             else:
                 sql = f"SELECT COUNT(*) as value FROM recalls {final_where}"
@@ -901,7 +927,7 @@ def compare_periods(period1: str, period2: str,
             result = cursor.fetchone()
             result_data["total"] = result["value"] if result else 0
             
-            # 🆕 리콜 사유별 분석 (현재 JSON 구조)
+            # 리콜 사유별 분석 (현재 JSON 구조)
             if include_reasons or "원인" in str(period) or "사유" in str(period):
                 reason_sql = f"""
                     SELECT recall_reason, COUNT(*) as count 
@@ -915,7 +941,7 @@ def compare_periods(period1: str, period2: str,
                 reasons = [{"reason": row["recall_reason"], "count": row["count"]} for row in cursor.fetchall()]
                 result_data["top_reasons"] = reasons
             
-            # 🆕 상세 사유별 분석 (오염물질, 알레르겐 등)
+            # 상세 사유별 분석 (오염물질, 알레르겐 등)
             if include_reasons:
                 detail_sql = f"""
                     SELECT recall_reason_detail, COUNT(*) as count 
@@ -938,7 +964,7 @@ def compare_periods(period1: str, period2: str,
         if data1 is None or data2 is None:
             return {"error": "잘못된 기간 형식입니다. YYYY 또는 YYYY-MM 형식을 사용하세요."}
         
-        # 🆕 변화율 계산 및 분석
+        # 변화율 계산 및 분석
         value1 = data1.get("total", 0)  # 2024년: 240
         value2 = data2.get("total", 0)  # 2025년: 125
         change = value2 - value1        # 125 - 240 = -115
@@ -960,7 +986,7 @@ def compare_periods(period1: str, period2: str,
             trend = "stable"
             trend_description = "비슷한 수준"
 
-        # 🔧 디버깅을 위해 print 추가
+        # 🔧 디버깅을 위해 print
         print(f"🔍 value1 (2024): {value1}")
         print(f"🔍 value2 (2025): {value2}")  
         print(f"🔍 change: {change}")
@@ -1001,11 +1027,11 @@ def search_recall_cases(query: str, limit: int = 5) -> Dict[str, Any]:
         return {"error": "ChromaDB 벡터스토어 연결 실패"}
     
     try:
-        # 🆕 향상된 검색어 확장 전략
+        # 향상된 검색어 확장 전략
         search_queries = []
         search_queries.append(query)  # 원본 질문
         
-        # 🆕 핵심 키워드 매핑 (현재 데이터에 맞춤)
+        # 핵심 키워드 매핑 (현재 데이터에 맞춤)
         enhanced_translations = {
             # 오염물질/세균
             "살모넬라": ["Salmonella", "salmonella contamination"],
@@ -1041,7 +1067,7 @@ def search_recall_cases(query: str, limit: int = 5) -> Dict[str, Any]:
             if ko_term in query:
                 search_queries.extend(en_terms)
         
-        # 🆕 전체 쿼리 번역
+        # 전체 쿼리 번역
         english_query = translate_to_english(query)
         if english_query != query and english_query not in search_queries:
             search_queries.append(english_query)
@@ -1054,7 +1080,7 @@ def search_recall_cases(query: str, limit: int = 5) -> Dict[str, Any]:
         all_docs = []
         seen_urls = set()
         
-        # 🆕 각 검색어로 검색 실행 (가중치 적용)
+        # 각 검색어로 검색 실행 (가중치 적용)
         for i, search_query in enumerate(search_queries):
             try:
                 # 검색 결과 수를 검색어 우선순위에 따라 조정
@@ -1076,14 +1102,14 @@ def search_recall_cases(query: str, limit: int = 5) -> Dict[str, Any]:
                 print(f"검색어 '{search_query}' 처리 중 오류: {search_error}")
                 continue
         
-        # 🆕 관련성 기반 정렬 (원본 쿼리와의 유사도 우선)
+        # 관련성 기반 정렬 (원본 쿼리와의 유사도 우선)
         if all_docs:
             # 상위 결과 선택
             selected_docs = all_docs[:limit]
         else:
             selected_docs = []
         
-        # 🆕 결과 포맷팅 (현재 JSON 구조 맞춤)
+        # 결과 포맷팅 (현재 JSON 구조 맞춤)
         cases = []
         for doc in selected_docs:
             # 현재 ChromaDB 메타데이터 구조에 맞춤
@@ -1106,7 +1132,7 @@ def search_recall_cases(query: str, limit: int = 5) -> Dict[str, Any]:
             
             cases.append(case_data)
         
-        # 🆕 검색 품질 평가
+        # 검색 품질 평가
         search_quality = evaluate_search_quality(query, cases)
         
         return {
@@ -1138,8 +1164,7 @@ def evaluate_search_quality(query: str, cases: list) -> Dict[str, Any]:
         search_keywords = [
             "살모넬라", "salmonella", "리스테리아", "listeria", 
             "대장균", "e.coli", "알레르겐", "allergen",
-            "우유", "milk", "계란", "egg", "견과류", "nuts"
-        ]
+            "우유", "milk", "계란", "egg", "견과류", "nuts"]
         
         for case in cases:
             case_text = " ".join([
@@ -1200,7 +1225,7 @@ def filter_exclude_conditions(exclude_terms: List[str],
     try:
         cursor = sqlite_conn.cursor()
         
-        # 🆕 기본 쿼리 구성 (모든 주요 필드 포함)
+        # 기본 쿼리 구성 (모든 주요 필드 포함)
         sql = """
             SELECT company_name, brand_name, product_type, recall_reason, 
                    recall_reason_detail, fda_publish_date, url
@@ -1209,7 +1234,7 @@ def filter_exclude_conditions(exclude_terms: List[str],
         """
         params = []
         
-        # 🆕 포함 조건 처리 (OR 조건)
+        # 포함 조건 처리 (OR 조건)
         if include_terms:
             include_conditions = []
             for term in include_terms:
@@ -1229,7 +1254,7 @@ def filter_exclude_conditions(exclude_terms: List[str],
             
             sql += f" AND ({' OR '.join(include_conditions)})"
         
-        # 🆕 제외 조건 처리 (AND NOT 조건)
+        # 제외 조건 처리 (AND NOT 조건)
         if exclude_terms:
             exclude_conditions = []
             for term in exclude_terms:
@@ -1262,7 +1287,7 @@ def filter_exclude_conditions(exclude_terms: List[str],
         cursor.execute(sql, params)
         filtered_results = cursor.fetchall()
         
-        # 🆕 통계 계산을 위한 별도 쿼리들
+        # 통계 계산을 위한 별도 쿼리들
         stats = calculate_filter_statistics(cursor, include_terms, exclude_terms)
         
         # 결과 포맷팅
@@ -1294,7 +1319,7 @@ def filter_exclude_conditions(exclude_terms: List[str],
         return {"error": f"제외 필터링 오류: {e}"}
     
 #-----------------------
-#메인 시스템 클래스
+# 메인 시스템 클래스
 #-----------------------
     
 
@@ -1312,7 +1337,7 @@ class FunctionCallRecallSystem:
             temperature=0
         ).bind_tools(self.tools)
         
-        # 🆕 답변 생성용 LLM (프롬프트 템플릿 적용)
+        # 답변 생성용 LLM (프롬프트 템플릿 적용)
         self.answer_llm = ChatOpenAI(
             model="gpt-4o-mini", 
             temperature=0.3
@@ -1325,7 +1350,7 @@ class FunctionCallRecallSystem:
             chat_history = []
         
         try:
-            # 하이브리드 시스템 프롬프트 (기존과 동일)
+            # 하이브리드 시스템 프롬프트
             system_prompt = """
                 당신은 FDA 리콜 데이터 전문 분석가입니다. 
                 사용자의 질문을 분석하여 적절한 함수들을 호출해서 정확한 답변을 제공하세요.
@@ -1443,7 +1468,7 @@ class FunctionCallRecallSystem:
                             })
                             break
                 
-                # 🆕 전문 프롬프트 템플릿으로 최종 답변 생성
+                # 전문 프롬프트 템플릿으로 최종 답변 생성
                 final_answer = self._generate_final_answer(question, tool_results)
                 
                 return {
@@ -1472,12 +1497,12 @@ class FunctionCallRecallSystem:
         if not tool_results:
             return "죄송합니다. 관련 정보를 찾을 수 없습니다."
         
-        # 🆕 질문 유형별 프롬프트 선택 및 컨텍스트 구성
+        # 질문 유형별 프롬프트 선택 및 컨텍스트 구성
         answer_context = self._build_answer_context(tool_results)
         selected_prompt = self._select_prompt_template(question, tool_results)
         
         try:
-            # 🆕 전문 프롬프트로 최종 답변 생성
+            # 전문 프롬프트로 최종 답변 생성
             final_prompt = selected_prompt.format(
                 question=question,
                 **answer_context
@@ -1700,7 +1725,7 @@ class FunctionCallRecallSystem:
                     answer_parts.append(f"   상세: {case.get('recall_detail', 'N/A')}")
                     answer_parts.append(f"   발표일: {case.get('fda_date', 'N/A')}")
                     
-                    # 🆕 개별 사례 URL 링크 추가
+                    # 개별 사례 URL 링크 추가
                     if case.get('url'):
                         answer_parts.append(f"   📋 [상세 정보 보기]({case.get('url')})")
                         all_urls.append(case.get('url'))
@@ -1711,7 +1736,7 @@ class FunctionCallRecallSystem:
                 answer_parts.append(f"**필터링 결과**: {len(filtered_cases)}건")
                 answer_parts.append(f"**통계**: 전체 {stats.get('total_records', 0)}건 중 {stats.get('final_filtered', 0)}건 선별")
                 
-                # 🆕 필터링된 사례들에 URL 포함
+                # 필터링된 사례들에 URL 포함
                 if filtered_cases:
                     answer_parts.append("**주요 사례**:")
                     for i, case in enumerate(filtered_cases[:3], 1):
@@ -1725,7 +1750,7 @@ class FunctionCallRecallSystem:
             
             answer_parts.append("")  # 섹션 구분
         
-        # 🆕 출처 섹션 추가
+        # 출처 섹션 추가
         if all_urls:
             # 중복 제거
             unique_urls = list(dict.fromkeys(all_urls))
@@ -1735,7 +1760,7 @@ class FunctionCallRecallSystem:
                 answer_parts.append(f"{i}. [FDA 공식 리콜 공지 #{i}]({url})")
             answer_parts.append("")
         
-        # 🆕 일반 FDA 출처 링크 항상 포함
+        # 일반 FDA 출처 링크 항상 포함
         answer_parts.append("**🔗 추가 정보**:")
         answer_parts.append("- [FDA 리콜 및 안전 경고 전체 목록](https://www.fda.gov/safety/recalls-market-withdrawals-safety-alerts/)")
         answer_parts.append("- [FDA 식품 안전 정보](https://www.fda.gov/food/food-safety-during-emergencies)")
@@ -1798,3 +1823,32 @@ def ask_recall_question(question: str, chat_history: List = None) -> Dict[str, A
             "processing_type": "error",
             "function_calls": []
         }
+    
+
+# === Agent 연동용 툴/리소스 export ===
+
+def export_recall_tools():
+    """RecallAgent가 그대로 바인딩해서 쓸 수 있는 LangChain Tool 리스트 반환"""
+    return [
+        count_recalls,
+        rank_by_field,
+        get_monthly_trend,
+        compare_periods,
+        search_recall_cases,
+        filter_exclude_conditions,
+    ]
+
+def get_sqlite_conn():
+    """Agent 등 외부에서 동일 커넥션을 재사용할 수 있도록 반환"""
+    conn, _, _ = _get_system_components()
+    return conn
+
+def tool_router(func_name: str, func_args: dict):
+    """에이전트가 func_name으로 바로 호출할 수 있는 라우터 (선택)"""
+    try:
+        tools = {t.name: t for t in export_recall_tools()}
+        if func_name in tools:
+            return tools[func_name].invoke(func_args or {})
+        return {"error": f"Unknown function: {func_name}"}
+    except Exception as e:
+        return {"error": f"tool_router error: {e}"}
