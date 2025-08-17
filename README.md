@@ -1,5 +1,5 @@
 <div align="center">
-<a href="https://functionriskkiller-5wmwxsr87emk8z5zh5nee3.streamlit.app/">
+<a href="https://functionriskkiller3-dbbjnmfdmkzpw3tgft9wjm.streamlit.app/">
 <img src="riskkiller.png" alt="Risk Killer Demo" style="border-radius: 10px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);" width="85%">
 </a>
 <br><br>
@@ -9,7 +9,7 @@
 <p>중소 식품 기업들이 전문 인력 비용 부담을 줄이고 효율적으로 미국 시장에 진입할 수 있는 </p>
 <p>맞춤형 LLM 챗봇을 구현하기 위해 진행한 프로젝트입니다.</p>
 
--- [실시간 앱 실행 (Streamlit)](https://functionriskkiller-5wmwxsr87emk8z5zh5nee3.streamlit.app/)
+-- [실시간 앱 실행 (Streamlit)](https://functionriskkiller3-dbbjnmfdmkzpw3tgft9wjm.streamlit.app/)
 -- [상세보고서 (PDF)](Risk_Killer.pdf)
 
 ---
