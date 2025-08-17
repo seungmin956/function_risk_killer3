@@ -12,7 +12,7 @@ from utils.chat_common_functions import (
     update_chat_history, handle_example_question, handle_user_input,
     reset_processing_state
 )
-from db_utils import get_visualization_data, check_new_realtime_data
+from db_utils import get_improved_visualization_data, check_recent_data_update
 from functools import lru_cache
 from datetime import datetime
 
@@ -42,112 +42,142 @@ def init_recall_session_state(session_keys):
     if st.session_state.viz_data is None:
         update_visualization_data()
 
-def render_fixed_visualizations():
-    """상단 고정 시각화 섹션 - 원인별 차트만 표시"""
+def render_improved_dashboard():
+    """상단 고정 시각화 섹션(개선ver)- 원인별 차트만 표시"""
     if not st.session_state.show_charts or not st.session_state.viz_data:
         return
     
-    # 고정 영역 컨테이너
-    viz_container = st.container()
+    viz_container = st.container() # 고정 영역 컨테이너
     
     with viz_container:
-        st.markdown("""<h1 style="font-size: 20px;"> 리콜 데이터 분석 대시보드</h1>""",unsafe_allow_html=True)
+        st.markdown("""<h1 style="font-size: 20px;">📊 리콜 데이터 분석 대시보드</h1>""", unsafe_allow_html=True)
         
-        # 통계 요약 카드 (고정 크기)
         stats = st.session_state.viz_data.get('stats', {})
         if stats:
             col1, col2, col3, col4 = st.columns(4)
             
+            # 카드 1: 총 데이터
             with col1:
                 total_recalls = stats.get('total_recalls', 0)
                 st.markdown(f"""
                 <div style="
-                    background-color:#f5f5f5; 
+                    background-color:#f8f9fa; 
                     padding:20px; 
-                    border-radius:10px; 
-                    border:1px solid #444;
+                    border-radius:12px; 
+                    border:2px solid #dee2e6;
                     height:140px;
                     display:flex;
                     flex-direction:column;
                     justify-content:center;
-                    min-width:0;
+                    text-align:center;
                 ">
-                    <p style='font-size:13px;text-align:left;color:#666;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'>총 리콜 건수</p>
-                    <p style='font-size:25px;text-align:left;font-weight:bold;color:black;margin:8px 0;'>{total_recalls}건</p>
-                    <p style='font-size:12px;text-align:left;color:#888;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'>전체 벡터DB 문서</p>
+                    <p style='font-size:14px;color:#6c757d;margin:0;font-weight:500;'> 총 리콜 데이터</p>
+                    <p style='font-size:28px;font-weight:bold;color:#212529;margin:8px 0;'>{total_recalls:,}건</p>
                 </div>
                 """, unsafe_allow_html=True)
             
+            # 카드 2: 최근 추가 (✅ 올바른 키 사용)
             with col2:
-                realtime_count = stats.get('realtime_recalls', 0)
-                realtime_ratio = stats.get('realtime_ratio', 0)
-                st.markdown(f"""
-                <div style="
-                    background-color:#f5f5f5; 
-                    padding:20px; 
-                    border-radius:10px; 
-                    border:1px solid #444;
-                    height:140px;
-                    display:flex;
-                    flex-direction:column;
-                    justify-content:center;
-                    min-width:0;
-                ">
-                    <p style='font-size:13px;text-align:left;color:#666;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'>⚡'실시간' 데이터</p>
-                    <p style='font-size:25px;text-align:left;font-weight:bold;color:#e74c3c;margin:8px 0;'>{realtime_count}건</p>
-                    <p style='font-size:12px;text-align:left;color:#888;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'>비율: {realtime_ratio:.1f}%</p>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col3:
-                database_count = stats.get('database_recalls', 0)
-                st.markdown(f"""
-                <div style="
-                    background-color:#f5f5f5; 
-                    padding:20px; 
-                    border-radius:10px; 
-                    border:1px solid #444;
-                    height:140px;
-                    display:flex;
-                    flex-direction:column;
-                    justify-content:center;
-                    min-width:0;
-                ">
-                    <p style='font-size:13px;text-align:left;color:#666;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'>📚기존 DB</p>
-                    <p style='font-size:25px;text-align:left;font-weight:bold;color:#3498db;margin:8px 0;'>{database_count:,}건</p>
-                    <p style='font-size:12px;text-align:left;color:#888;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'>사전 구축 데이터</p>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            with col4:
-                latest_crawl = stats.get('latest_crawl', '없음')
-                if latest_crawl != '없음' and len(latest_crawl) > 10:
-                    display_time = latest_crawl[:10]  # 날짜만
-                    display_hour = latest_crawl[11:16]  # 시간만
+                recent_added = stats.get('recent_added', 0)  # ✅ 올바른 키
+                recent_period = stats.get('recent_period', '이번 주')
+                has_new = stats.get('has_new_data', False)
+                
+                # 상태에 따른 색상 변경
+                if has_new and recent_added > 0:
+                    bg_color, border_color, text_color = "#d4edda", "#c3e6cb", "#155724"
+                elif recent_added == 0:
+                    bg_color, border_color, text_color = "#f8d7da", "#f5c6cb", "#721c24"
                 else:
-                    display_time = latest_crawl
-                    display_hour = ""
+                    bg_color, border_color, text_color = "#fff3cd", "#ffeaa7", "#856404"
                 
                 st.markdown(f"""
                 <div style="
-                    background-color:#f5f5f5; 
+                    background-color:{bg_color}; 
                     padding:20px; 
-                    border-radius:10px; 
-                    border:1px solid #444;
+                    border-radius:12px; 
+                    border:2px solid {border_color};
                     height:140px;
                     display:flex;
                     flex-direction:column;
                     justify-content:center;
-                    min-width:0;
+                    text-align:center;
                 ">
-                    <p style='font-size:13px;text-align:left;color:#666;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'>최근 업데이트</p>
-                    <p style='font-size:25px;text-align:left;font-weight:bold;color:#27ae60;margin:4px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'>{display_time}</p>
-                    <p style='font-size:12px;text-align:left;color:#888;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'>{display_hour}</p>
+                    <p style='font-size:14px;color:{text_color};margin:0;font-weight:500;'>최근 추가</p>
+                    <p style='font-size:28px;font-weight:bold;color:{text_color};margin:8px 0;'>{recent_added}건</p>
                 </div>
                 """, unsafe_allow_html=True)
+            
+            # 카드 3: 기존 데이터 (✅ 올바른 키 사용)
+            with col3:
+                baseline_data = stats.get('baseline_data', 0)  # ✅ 올바른 키
+                st.markdown(f"""
+                <div style="
+                    background-color:#f8f9fa; 
+                    padding:20px; 
+                    border-radius:12px; 
+                    border:2px solid #dee2e6;
+                    height:140px;
+                    display:flex;
+                    flex-direction:column;
+                    justify-content:center;
+                    text-align:center;
+                ">
+                    <p style='font-size:14px;color:#212529;margin:0;font-weight:500;'> 기존 데이터</p>
+                    <p style='font-size:28px;font-weight:bold;color:#212529;margin:8px 0;'>{baseline_data:,}건</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # 카드 4: 마지막 업데이트 (✅ 올바른 키 사용)
+            with col4:
+                last_update = stats.get('last_update', '정보 없음')  # ✅ 올바른 키
+                update_method = stats.get('update_method', '수동')    # ✅ 올바른 키
+                days_ago = stats.get('days_since_update', 999)       # ✅ 올바른 키
+                
+                # 업데이트 상태에 따른 색상
+                if days_ago <= 3:
+                    status_emoji = "🟢"
+                elif days_ago <= 7:
+                    status_emoji = "🟡"
+                else:
+                    status_emoji = "🔴"
+                
+                # 날짜 포맷팅
+                if last_update != '정보 없음' and last_update != '오류' and len(last_update) > 10:
+                    display_date = last_update[:10]
+                    display_time = last_update[11:16] if len(last_update) > 16 else ""
+                else:
+                    display_date = last_update[:12] if len(last_update) > 12 else last_update
+                    display_time = ""
+                
+                st.markdown(f"""
+                <div style="
+                    background-color:#f8f9fa; 
+                    padding:20px; 
+                    border-radius:12px; 
+                    border:2px solid #dee2e6;
+                    height:140px;
+                    display:flex;
+                    flex-direction:column;
+                    justify-content:center;
+                    text-align:center;
+                ">
+                    <p style='font-size:14px;color:#212529;margin:0;font-weight:500;'>{status_emoji} 마지막 업데이트</p>
+                    <p style='font-size:20px;font-weight:bold;color:#212529;margin:4px 0;'>{display_date}</p>
+                    <p style='font-size:12px;color:#212529;margin:0;'>{display_time} ({update_method})</p>
+                </div>
+                """, unsafe_allow_html=True)
+    
         
-        # 간격 추가
-        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown(f"""
+        <div style="margin-top:15px; padding:12px; background-color:#f8f9fa; border-radius:8px; border-left:4px solid #007bff;">
+            <p style="margin:0; font-size:14px;">
+                <strong> 업데이트 방식:</strong> 
+                매주 월요일 정기적으로 실시간 데이터가 업데이트됩니다.
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("<br>", unsafe_allow_html=True) # 간격 추가
 
 def update_visualization_data():
     """시각화 데이터 업데이트 - db_utils 모듈 사용"""
@@ -156,7 +186,7 @@ def update_visualization_data():
     
     try:
         # db_utils의 함수 사용
-        viz_data = get_visualization_data()
+        viz_data = get_improved_visualization_data()
         
         if viz_data and viz_data.get('has_data'):
             st.session_state.viz_data = viz_data
@@ -231,7 +261,7 @@ def render_example_questions(session_keys, is_processing):
 def render_chat_area(session_keys, is_processing):
     """메인 채팅 영역 렌더링"""
     
-    render_fixed_visualizations() # 상단 고정 시각화
+    render_improved_dashboard() # 상단 고정 시각화
     render_example_questions(session_keys, is_processing) # 예시 질문 섹션
     
     # 대화 기록 표시

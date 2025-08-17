@@ -336,66 +336,69 @@ def filter_none_values(metadata_dict):
         # None이거나 빈 문자열인 경우 해당 키는 제외
     return filtered
 
-def get_recall_stats_from_db(db_path: str = "./data/fda_recalls.db"):
-    """SQLite DB에서 리콜 통계 데이터 추출"""
-    
-    if not os.path.exists(db_path):
-        return {
-            'total_recalls': 0,
-            'realtime_recalls': 0,
-            'database_recalls': 0,
-            'realtime_ratio': 0,
-            'latest_crawl': '없음'
-        }
-    
+def get_recent_json_file_count():
+    """최근 JSON 파일에서 실제 추가된 데이터 개수 확인"""
     try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
+        data_dir = "./data"
+        if not os.path.exists(data_dir):
+            return 0
         
-        # 총 리콜 건수
-        cursor.execute("SELECT COUNT(*) FROM recalls")
-        total_recalls = cursor.fetchone()[0]
+        import json
+        import glob
+        from datetime import datetime, timedelta  # ✅ import 추가
         
-        # 최근 3일간 추가된 데이터 (실시간으로 간주)
-        three_days_ago = (datetime.now() - timedelta(days=3)).strftime('%Y-%m-%d')
-        cursor.execute("""
-            SELECT COUNT(*) FROM recalls 
-            WHERE DATE(created_at) >= ?
-        """, (three_days_ago,))
-        realtime_recalls = cursor.fetchone()[0]
+        # 최근 7일 이내 JSON 파일들 찾기
+        json_pattern = os.path.join(data_dir, "realtime_recalls_*.json")
+        json_files = glob.glob(json_pattern)
         
-        # 기존 DB 데이터
-        database_recalls = total_recalls - realtime_recalls
+        if not json_files:
+            print("📂 realtime_recalls_*.json 파일 없음")
+            return 0
         
-        # 실시간 비율
-        realtime_ratio = (realtime_recalls / total_recalls * 100) if total_recalls > 0 else 0
+        # 가장 최근 파일 선택
+        latest_json = max(json_files, key=os.path.getmtime)
+        json_time = os.path.getmtime(latest_json)
+        json_datetime = datetime.fromtimestamp(json_time)
         
-        # 최근 업데이트 시간
-        cursor.execute("""
-            SELECT MAX(created_at) FROM recalls
-        """)
-        latest_result = cursor.fetchone()[0]
-        latest_crawl = latest_result if latest_result else '없음'
+        # 7일 이내 파일인지 확인
+        days_ago = (datetime.now() - json_datetime).days
+        print(f"📅 최신 JSON 파일: {os.path.basename(latest_json)} ({days_ago}일 전)")
         
-        conn.close()
+        if days_ago > 7:
+            print(f"⏰ {days_ago}일 전 파일이므로 최근 데이터 아님")
+            return 0
         
-        return {
-            'total_recalls': total_recalls,
-            'realtime_recalls': realtime_recalls,
-            'database_recalls': database_recalls,
-            'realtime_ratio': realtime_ratio,
-            'latest_crawl': latest_crawl
-        }
-        
+        # JSON 파일 내용 읽어서 실제 개수 확인
+        try:
+            with open(latest_json, 'r', encoding='utf-8') as f:
+                json_data = json.load(f)
+                if isinstance(json_data, list):
+                    print(f"✅ JSON 파일에서 {len(json_data)}건 확인")
+                    return len(json_data)
+                else:
+                    return 0
+        except Exception as e:
+            print(f"❌ JSON 파일 읽기 오류: {e}")
+            return 0
+            
     except Exception as e:
-        print(f"DB 통계 조회 오류: {e}")
-        return {
-            'total_recalls': 0,
-            'realtime_recalls': 0,
-            'database_recalls': 0,
-            'realtime_ratio': 0,
-            'latest_crawl': '오류'
-        }
+        print(f"JSON 파일 개수 확인 오류: {e}")
+        return 0
+
+def get_conservative_recent_data_count(db_path: str = "./data/fda_recalls.db"):
+    """보수적인 최근 데이터 계산 (현실적인 접근)"""
+    try:
+        # 1. JSON 파일 기준 확인
+        json_count = get_recent_json_file_count()
+        if json_count > 0:
+            return json_count
+        
+        # 2. JSON 파일이 없으면 0으로 가정 (보수적 접근)
+        # 이유: 실제로 새 크롤링이 없었다면 새 데이터도 없음
+        return 0
+        
+    except:
+        return 0
 
 def get_chromadb_stats(db_path: str = "./data/chroma_db_recall", collection_name: str = "FDA_recalls"):
     """ChromaDB에서 문서 수 확인"""
@@ -407,58 +410,170 @@ def get_chromadb_stats(db_path: str = "./data/chroma_db_recall", collection_name
     except Exception as e:
         print(f"ChromaDB 조회 오류: {e}")
         return 0
-
-def get_visualization_data():
-    """시각화용 통합 데이터 반환"""
+    
+def get_realistic_recall_stats(db_path: str = "./data/fda_recalls.db"):
+    """실제 상황에 맞는 리콜 통계 데이터 추출 - 최종 수정판"""
+    
+    if not os.path.exists(db_path):
+        return {
+            'total_recalls': 0,
+            'recent_added': 0,
+            'baseline_data': 0,
+            'recent_period': '이번 주',
+            'last_update': '정보 없음',
+            'update_method': '수동',
+            'has_new_data': False,
+            'days_since_update': 999
+        }
+    
     try:
-        # SQLite 통계
-        sqlite_stats = get_recall_stats_from_db()
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
         
-        # ChromaDB 통계
-        chromadb_count = get_chromadb_stats()
+        # 🔧 핵심 수정: 고유 URL 수로 실제 리콜 사례 계산
+        cursor.execute("SELECT COUNT(DISTINCT url) FROM recalls")
+        actual_recall_cases = cursor.fetchone()[0]  # 734건
         
-        # ChromaDB 수가 더 정확할 수 있으므로 업데이트
-        if chromadb_count > 0:
-            sqlite_stats['total_recalls'] = chromadb_count
+        # 🔧 최근 추가 데이터 계산 - JSON 파일 기반으로만 판단
+        recent_added = get_recent_json_file_count()
         
-        # JSON 파일 확인 (최근 크롤링 여부)
-        data_dir = "./data"
-        json_files = []
-        if os.path.exists(data_dir):
-            import glob
-            json_pattern = os.path.join(data_dir, "realtime_recalls_*.json")
-            json_files = glob.glob(json_pattern)
-            json_files.sort(reverse=True)  # 최신 파일 우선
+        # 🚨 JSON 파일이 없으면 최근 추가는 0으로 가정 (보수적 접근)
+        if recent_added == 0:
+            print("📋 JSON 파일 없음 - 모든 데이터를 기존 데이터로 분류")
         
-        # 최근 JSON 파일이 있으면 실시간 데이터로 카운트
-        if json_files:
-            latest_json = json_files[0]
-            json_time = os.path.getmtime(latest_json)
-            json_datetime = datetime.fromtimestamp(json_time)
-            
-            # 최근 24시간 내 파일이면 실시간으로 간주
-            if (datetime.now() - json_datetime).total_seconds() < 86400:  # 24시간
-                sqlite_stats['latest_crawl'] = json_datetime.strftime('%Y-%m-%d %H:%M:%S')
+        # 기존 데이터 = 전체 - 최근 추가
+        baseline_data = actual_recall_cases - recent_added
+        
+        # 📅 실제 마지막 크롤링 시간 확인
+        last_update_info = get_last_crawling_time()
+        
+        # 📊 새로운 데이터 여부 체크
+        has_new_data = recent_added > 0 and last_update_info['days_ago'] <= 7
+        
+        conn.close()
         
         return {
-            'stats': sqlite_stats,
-            'has_data': sqlite_stats['total_recalls'] > 0
+            'total_recalls': actual_recall_cases,  # 734건 (실제 사례)
+            'recent_added': recent_added,           # 0건 (JSON 기반)
+            'baseline_data': baseline_data,         # 734건 (전체 - 최근)
+            'recent_period': '이번 주',
+            'last_update': last_update_info['datetime'],
+            'update_method': last_update_info['method'],
+            'has_new_data': has_new_data,
+            'days_since_update': last_update_info['days_ago'],
+            # 🆕 추가 정보 (선택적 표시용)
+            'chromadb_chunks': get_chromadb_stats(),  # 1,270개 (검색용)
+            'chunk_ratio': round(get_chromadb_stats() / actual_recall_cases, 2) if actual_recall_cases > 0 else 0
         }
         
     except Exception as e:
-        print(f"시각화 데이터 생성 오류: {e}")
+        print(f"DB 통계 조회 오류: {e}")
+        return {
+            'total_recalls': 0,
+            'recent_added': 0,
+            'baseline_data': 0,
+            'recent_period': '이번 주',
+            'last_update': '오류',
+            'update_method': '알 수 없음',
+            'has_new_data': False,
+            'days_since_update': 999
+        }
+
+def get_last_crawling_time():
+    """실제 마지막 크롤링 시간 확인 (JSON 파일 + DB 조합)"""
+    try:
+        from datetime import datetime, timedelta  # ✅ import 추가
+        data_dir = "./data"
+        
+        # 1. JSON 파일에서 최근 크롤링 시간 확인
+        if os.path.exists(data_dir):
+            import glob
+            import re
+            json_pattern = os.path.join(data_dir, "realtime_recalls_*.json")
+            json_files = glob.glob(json_pattern)
+            
+            if json_files:
+                # 최신 JSON 파일 선택
+                latest_json = max(json_files, key=os.path.getmtime)
+                json_time = os.path.getmtime(latest_json)
+                json_datetime = datetime.fromtimestamp(json_time)
+                
+                # 파일명에서 타임스탬프 추출 (더 정확함)
+                filename = os.path.basename(latest_json)
+                # realtime_recalls_20250116_1430.json 형식
+                timestamp_match = re.search(r'(\d{8})_(\d{4})', filename)
+                if timestamp_match:
+                    date_str, time_str = timestamp_match.groups()
+                    # 20250116_1430 → 2025-01-16 14:30
+                    formatted_datetime = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]} {time_str[:2]}:{time_str[2:4]}"
+                    try:
+                        crawl_datetime = datetime.strptime(formatted_datetime, "%Y-%m-%d %H:%M")
+                    except:
+                        crawl_datetime = json_datetime
+                else:
+                    crawl_datetime = json_datetime
+                
+                days_ago = (datetime.now() - crawl_datetime).days
+                
+                return {
+                    'datetime': crawl_datetime.strftime("%Y-%m-%d %H:%M"),
+                    'method': '주간 자동' if days_ago <= 7 else '수동',
+                    'days_ago': days_ago,
+                    'source': 'json_file'
+                }
+        
+        # 2. JSON 파일이 없으면 기본값
+        return {
+            'datetime': '정보 없음',
+            'method': '수동',
+            'days_ago': 999,
+            'source': 'none'
+        }
+        
+    except Exception as e:
+        print(f"크롤링 시간 확인 오류: {e}")
+        return {
+            'datetime': '오류',
+            'method': '알 수 없음',
+            'days_ago': 999,
+            'source': 'error'
+        }
+
+def get_improved_visualization_data():
+    """개선된 시각화용 데이터 반환 - 수정판"""
+    try:
+        # 실제 상황에 맞는 통계 (734건 유지)
+        realistic_stats = get_realistic_recall_stats()
+        
+        # 🔧 ChromaDB 카운트는 별도 정보로만 저장 (덮어쓰지 않음)
+        chromadb_count = get_chromadb_stats()
+        
+        # ✅ 수정: 실제 사례 수 유지하고 ChromaDB는 참고용으로만
+        realistic_stats['chromadb_chunks'] = chromadb_count  # 이미 포함되어 있음
+        
+        return {
+            'stats': realistic_stats,
+            'has_data': realistic_stats['total_recalls'] > 0,
+            'data_source': 'sqlite_primary_chroma_reference'
+        }
+        
+    except Exception as e:
+        print(f"개선된 시각화 데이터 생성 오류: {e}")
         return {
             'stats': {
                 'total_recalls': 0,
-                'realtime_recalls': 0,
-                'database_recalls': 0,
-                'realtime_ratio': 0,
-                'latest_crawl': '오류'
+                'recent_added': 0,
+                'baseline_data': 0,
+                'recent_period': '이번 주',
+                'last_update': '오류',
+                'update_method': '알 수 없음',
+                'has_new_data': False
             },
             'has_data': False
         }
 
-def check_new_realtime_data():
+
+def check_recent_data_update():
     """새로운 실시간 데이터가 있는지 확인"""
     try:
         data_dir = "./data"
