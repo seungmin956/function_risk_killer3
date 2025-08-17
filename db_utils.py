@@ -542,7 +542,7 @@ def get_last_crawling_time():
 def get_improved_visualization_data():
     """개선된 시각화용 데이터 반환 - 수정판"""
     try:
-        # 실제 상황에 맞는 통계 (734건 유지)
+        # 실제 상황에 맞는 통계
         realistic_stats = get_realistic_recall_stats()
         
         # 🔧 ChromaDB 카운트는 별도 정보로만 저장 (덮어쓰지 않음)

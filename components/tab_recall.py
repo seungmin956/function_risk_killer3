@@ -400,7 +400,6 @@ def show_recall_chat():
     col_left, col_center, col_right = st.columns([1, 3, 1])
    
     with col_left:
-        # 프로젝트 이름 입력
         project_name = st.text_input("프로젝트 이름", placeholder="리콜 프로젝트명", key="recall_project_input")
         
         # 사이드바 컨트롤 렌더링
