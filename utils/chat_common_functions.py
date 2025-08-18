@@ -15,6 +15,7 @@ from typing import List, Dict, Any, Optional
 from langchain_core.messages import AIMessage, HumanMessage
 import threading
 from functools import lru_cache
+import time
 
 # 대화 기록 파일 경로
 CHAT_HISTORY_FILE = "chat_histories.json"
@@ -254,6 +255,239 @@ def get_project_list() -> List[str]:
         return sorted(list(projects))
     except Exception:
         return []
+
+def stream_response_typing(sentences: List[str], placeholder, delay_between_sentences=0.8, char_delay=0.03):
+    """ChatGPT 스타일 스트리밍 타이핑 애니메이션"""
+    if not sentences:
+        return
+    
+    displayed_text = ""
+    
+    for sentence in sentences:
+        # 문장 단위로 타이핑
+        sentence_text = ""
+        for char in sentence:
+            sentence_text += char
+            current_display = displayed_text + sentence_text + "▊"
+            placeholder.markdown(current_display)
+            time.sleep(char_delay)
+        
+        # 완성된 문장을 전체 텍스트에 추가
+        displayed_text += sentence + " "
+        
+        # 문장 간 딜레이
+        if sentence != sentences[-1]:  # 마지막 문장이 아니면
+            placeholder.markdown(displayed_text + "▊")
+            time.sleep(delay_between_sentences)
+    
+    # 최종 텍스트 출력 (커서 제거)
+    placeholder.markdown(displayed_text.strip())
+
+def quick_stream_response(text: str, placeholder, chunk_size=15, delay=0.5):
+    """빠른 청크 단위 스트리밍 (긴 답변용)"""
+    words = text.split()
+    chunks = []
+    
+    # 단어를 청크로 나누기
+    for i in range(0, len(words), chunk_size):
+        chunk = " ".join(words[i:i + chunk_size])
+        chunks.append(chunk)
+    
+    displayed_text = ""
+    for chunk in chunks:
+        displayed_text += chunk + " "
+        placeholder.markdown(displayed_text + "▊")
+        time.sleep(delay)
+    
+    # 최종 출력
+    placeholder.markdown(displayed_text.strip())
+
+def handle_streaming_response(result: Dict, placeholder, use_quick_mode=False):
+    """스트리밍 응답 처리 - 사용자 설정 완전 반영 버전"""
+    import streamlit as st
+    import time
+    
+    try:
+        # 사용자 설정 가져오기 (기본값 포함)
+        settings = st.session_state.get("animation_settings", {})
+        char_delay = settings.get("char_delay", 0.03)
+        sentence_delay = settings.get("sentence_delay", 0.8)
+        enabled = settings.get("enabled", True)
+        quick_threshold = settings.get("quick_mode_threshold", 2000)
+        debug_mode = st.session_state.get("debug_mode", False)
+        
+        # 디버그 정보 출력
+        if debug_mode:
+            st.caption(f"🔧 디버그: 애니메이션={'ON' if enabled else 'OFF'}, 속도={char_delay}s, 문장딜레이={sentence_delay}s")
+        
+        # 애니메이션이 비활성화된 경우 즉시 출력
+        if not enabled:
+            placeholder.markdown(result["answer"])
+            if debug_mode:
+                st.success("⚡ 즉시 출력 모드로 표시 완료")
+            return
+        
+        # 답변 길이 체크
+        answer_text = result.get("answer", "")
+        answer_length = len(answer_text)
+        
+        # 빠른 모드 조건 체크
+        force_quick_mode = use_quick_mode or answer_length > quick_threshold
+        
+        if debug_mode:
+            st.caption(f"📏 답변 길이: {answer_length}자, 빠른모드: {'ON' if force_quick_mode else 'OFF'}")
+        
+        # 스트리밍 방식 선택 및 실행
+        if "streaming_sentences" in result and result["streaming_sentences"] and not force_quick_mode:
+            # 방식 1: 문장 단위 정밀 스트리밍 (일반 모드)
+            _stream_response_typing_enhanced(
+                result["streaming_sentences"], 
+                placeholder,
+                char_delay=char_delay,
+                sentence_delay=sentence_delay,
+                debug_mode=debug_mode
+            )
+        else:
+            # 방식 2: 빠른 청크 스트리밍 (긴 답변 또는 fallback)
+            chunk_size = _calculate_optimal_chunk_size(answer_length)
+            chunk_delay = max(0.1, char_delay * 20)  # 청크 딜레이는 문자 딜레이의 20배
+            
+            _quick_stream_response_enhanced(
+                answer_text, 
+                placeholder, 
+                chunk_size=chunk_size,
+                delay=chunk_delay,
+                debug_mode=debug_mode
+            )
+            
+    except Exception as e:
+        # 오류 시 즉시 출력
+        placeholder.markdown(result.get("answer", "답변을 표시할 수 없습니다."))
+        if debug_mode:
+            st.error(f"🚨 스트리밍 애니메이션 오류: {e}")
+        else:
+            print(f"스트리밍 애니메이션 오류: {e}")
+
+def _stream_response_typing_enhanced(sentences: List[str], placeholder, char_delay=0.03, sentence_delay=0.8, debug_mode=False):
+    """향상된 문장 단위 타이핑 애니메이션"""
+    if not sentences:
+        return
+    
+    displayed_text = ""
+    total_sentences = len(sentences)
+    
+    if debug_mode:
+        st.caption(f"🎬 문장별 타이핑 시작: {total_sentences}개 문장")
+    
+    for sentence_idx, sentence in enumerate(sentences):
+        if not sentence.strip():  # 빈 문장 스킵
+            continue
+            
+        # 문장별 타이핑
+        sentence_text = ""
+        sentence = sentence.strip()
+        
+        # 문장 시작 시 약간의 딜레이 (첫 문장 제외)
+        if sentence_idx > 0:
+            time.sleep(sentence_delay)
+        
+        # 문자별 타이핑
+        for char_idx, char in enumerate(sentence):
+            sentence_text += char
+            
+            # 현재 표시 텍스트 생성 (커서 포함)
+            current_display = displayed_text + sentence_text + "▊"
+            placeholder.markdown(current_display)
+            
+            # 문자 간 딜레이
+            time.sleep(char_delay)
+        
+        # 완성된 문장을 전체 텍스트에 추가
+        displayed_text += sentence
+        
+        # 문장 끝에 공백이나 줄바꿈이 없으면 추가
+        if sentence_idx < total_sentences - 1:
+            if not displayed_text.endswith((' ', '\n')):
+                displayed_text += " "
+        
+        # 진행상황 표시 (디버그 모드)
+        if debug_mode and sentence_idx % 3 == 0:  # 3문장마다 표시
+            progress = (sentence_idx + 1) / total_sentences
+            st.caption(f"📝 진행률: {progress:.1%} ({sentence_idx + 1}/{total_sentences})")
+    
+    # 최종 텍스트 출력 (커서 제거)
+    placeholder.markdown(displayed_text.strip())
+    
+    if debug_mode:
+        st.success(f"✅ 문장별 타이핑 완료: {len(displayed_text)}자 출력")
+
+def _quick_stream_response_enhanced(text: str, placeholder, chunk_size=15, delay=0.3, debug_mode=False):
+    """향상된 빠른 청크 단위 스트리밍"""
+    words = text.split()
+    chunks = []
+    
+    # 단어를 청크로 나누기
+    for i in range(0, len(words), chunk_size):
+        chunk = " ".join(words[i:i + chunk_size])
+        chunks.append(chunk)
+    
+    if debug_mode:
+        st.caption(f"🚀 빠른 모드 시작: {len(chunks)}개 청크, 청크당 {chunk_size}단어")
+    
+    displayed_text = ""
+    total_chunks = len(chunks)
+    
+    for chunk_idx, chunk in enumerate(chunks):
+        displayed_text += chunk + " "
+        
+        # 커서와 함께 표시
+        current_display = displayed_text + "▊"
+        placeholder.markdown(current_display)
+        
+        # 청크 간 딜레이
+        time.sleep(delay)
+        
+        # 진행상황 표시 (디버그 모드, 20% 간격)
+        if debug_mode and chunk_idx % max(1, total_chunks // 5) == 0:
+            progress = (chunk_idx + 1) / total_chunks
+            st.caption(f"🏃 빠른모드 진행률: {progress:.1%}")
+    
+    # 최종 출력
+    placeholder.markdown(displayed_text.strip())
+    
+    if debug_mode:
+        st.success(f"⚡ 빠른 모드 완료: {len(chunks)}개 청크 출력")
+
+def _calculate_optimal_chunk_size(text_length: int) -> int:
+    """텍스트 길이에 따른 최적 청크 크기 계산"""
+    if text_length < 500:
+        return 8      # 짧은 텍스트: 작은 청크
+    elif text_length < 1500:
+        return 15     # 중간 텍스트: 보통 청크
+    elif text_length < 3000:
+        return 25     # 긴 텍스트: 큰 청크
+    else:
+        return 35     # 매우 긴 텍스트: 매우 큰 청크
+
+def stream_response_typing(sentences: List[str], placeholder, delay_between_sentences=0.8, char_delay=0.03):
+    """기본 문장 단위 타이핑 애니메이션 (하위 호환성 유지)"""
+    return _stream_response_typing_enhanced(
+        sentences, 
+        placeholder, 
+        char_delay=char_delay, 
+        sentence_delay=delay_between_sentences,
+        debug_mode=False
+    )
+
+def quick_stream_response(text: str, placeholder, chunk_size=15, delay=0.5):
+    """기본 빠른 청크 스트리밍 (하위 호환성 유지)"""
+    return _quick_stream_response_enhanced(
+        text, 
+        placeholder, 
+        chunk_size=chunk_size, 
+        delay=delay,
+        debug_mode=False
+    )
 
 def cleanup_old_histories(days_to_keep: int = 30) -> None:
     """오래된 대화 기록 정리 (선택사항)"""

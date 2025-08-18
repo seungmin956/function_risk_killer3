@@ -1,23 +1,21 @@
 # components/tab_recall.py
 
 import streamlit as st
-# import plotly.express as px
-# import pandas as pd
-# from utils.function_calling_system import ask_recall_question, get_recall_vectorstore
-from utils.function_calling_system import get_recall_vectorstore
+import time
 from utils.agent_recall import RecallAgent
 from utils.chat_common_functions import (
     save_chat_history, get_session_keys, initialize_session_state,
     clear_session_state, handle_project_change, display_chat_history,
     update_chat_history, handle_example_question, handle_user_input,
-    reset_processing_state
+    reset_processing_state, quick_stream_response  # quick_stream_response로 변경
 )
+from utils.function_calling_system import get_recall_vectorstore
 from db_utils import get_improved_visualization_data, check_recent_data_update
 from functools import lru_cache
 from datetime import datetime
 
 recall_vectorstore = get_recall_vectorstore()
-agent = RecallAgent(add_hint=True)  # Agent 사용
+agent = RecallAgent(add_hint=True)
 
 # 리콜 관련 예시 질문
 @lru_cache(maxsize=1)
@@ -43,11 +41,11 @@ def init_recall_session_state(session_keys):
         update_visualization_data()
 
 def render_improved_dashboard():
-    """상단 고정 시각화 섹션(개선ver)- 원인별 차트만 표시"""
+    """개선된 대시보드 - 정확한 키 사용"""
     if not st.session_state.show_charts or not st.session_state.viz_data:
         return
     
-    viz_container = st.container() # 고정 영역 컨테이너
+    viz_container = st.container()
     
     with viz_container:
         st.markdown("""<h1 style="font-size: 20px;">📊 리콜 데이터 분석 대시보드</h1>""", unsafe_allow_html=True)
@@ -71,18 +69,17 @@ def render_improved_dashboard():
                     justify-content:center;
                     text-align:center;
                 ">
-                    <p style='font-size:14px;color:#6c757d;margin:0;font-weight:500;'> 총 리콜 데이터</p>
+                    <p style='font-size:14px;color:#6c757d;margin:0;font-weight:500;'>총 리콜 데이터</p>
                     <p style='font-size:28px;font-weight:bold;color:#212529;margin:8px 0;'>{total_recalls:,}건</p>
                 </div>
                 """, unsafe_allow_html=True)
             
-            # 카드 2: 최근 추가 (✅ 올바른 키 사용)
+            # 카드 2: 최근 추가
             with col2:
-                recent_added = stats.get('recent_added', 0)  # ✅ 올바른 키
+                recent_added = stats.get('recent_added', 0)
                 recent_period = stats.get('recent_period', '이번 주')
                 has_new = stats.get('has_new_data', False)
                 
-                # 상태에 따른 색상 변경
                 if has_new and recent_added > 0:
                     bg_color, border_color, text_color = "#d4edda", "#c3e6cb", "#155724"
                 elif recent_added == 0:
@@ -107,9 +104,9 @@ def render_improved_dashboard():
                 </div>
                 """, unsafe_allow_html=True)
             
-            # 카드 3: 기존 데이터 (✅ 올바른 키 사용)
+            # 카드 3: 기존 데이터
             with col3:
-                baseline_data = stats.get('baseline_data', 0)  # ✅ 올바른 키
+                baseline_data = stats.get('baseline_data', 0)
                 st.markdown(f"""
                 <div style="
                     background-color:#f8f9fa; 
@@ -122,18 +119,17 @@ def render_improved_dashboard():
                     justify-content:center;
                     text-align:center;
                 ">
-                    <p style='font-size:14px;color:#212529;margin:0;font-weight:500;'> 기존 데이터</p>
+                    <p style='font-size:14px;color:#212529;margin:0;font-weight:500;'>기존 데이터</p>
                     <p style='font-size:28px;font-weight:bold;color:#212529;margin:8px 0;'>{baseline_data:,}건</p>
                 </div>
                 """, unsafe_allow_html=True)
             
-            # 카드 4: 마지막 업데이트 (✅ 올바른 키 사용)
+            # 카드 4: 마지막 업데이트
             with col4:
-                last_update = stats.get('last_update', '정보 없음')  # ✅ 올바른 키
-                update_method = stats.get('update_method', '수동')    # ✅ 올바른 키
-                days_ago = stats.get('days_since_update', 999)       # ✅ 올바른 키
+                last_update = stats.get('last_update', '정보 없음')
+                update_method = stats.get('update_method', '수동')
+                days_ago = stats.get('days_since_update', 999)
                 
-                # 업데이트 상태에 따른 색상
                 if days_ago <= 3:
                     status_emoji = "🟢"
                 elif days_ago <= 7:
@@ -141,7 +137,6 @@ def render_improved_dashboard():
                 else:
                     status_emoji = "🔴"
                 
-                # 날짜 포맷팅
                 if last_update != '정보 없음' and last_update != '오류' and len(last_update) > 10:
                     display_date = last_update[:10]
                     display_time = last_update[11:16] if len(last_update) > 16 else ""
@@ -166,26 +161,24 @@ def render_improved_dashboard():
                     <p style='font-size:12px;color:#212529;margin:0;'>{display_time} ({update_method})</p>
                 </div>
                 """, unsafe_allow_html=True)
-    
         
         st.markdown(f"""
         <div style="margin-top:15px; padding:12px; background-color:#f8f9fa; border-radius:8px; border-left:4px solid #007bff;">
             <p style="margin:0; font-size:14px;">
-                <strong> 업데이트 방식:</strong> 
+                <strong>업데이트 방식:</strong> 
                 매주 월요일 정기적으로 실시간 데이터가 업데이트됩니다.
             </p>
         </div>
         """, unsafe_allow_html=True)
         
-        st.markdown("<br>", unsafe_allow_html=True) # 간격 추가
+        st.markdown("<br>", unsafe_allow_html=True)
 
 def update_visualization_data():
-    """시각화 데이터 업데이트 - db_utils 모듈 사용"""
+    """시각화 데이터 업데이트"""
     if recall_vectorstore is None:
         return
     
     try:
-        # db_utils의 함수 사용
         viz_data = get_improved_visualization_data()
         
         if viz_data and viz_data.get('has_data'):
@@ -199,15 +192,13 @@ def update_visualization_data():
         st.session_state.show_charts = False
 
 def render_sidebar_controls(project_name, chat_mode, session_keys):
-    """사이드바 컨트롤 패널 렌더링 - 상태 표시만"""
-    # 프로젝트 변경 처리
+    """사이드바 컨트롤 패널 렌더링"""
     project_changed = handle_project_change(project_name, chat_mode, session_keys)
     if project_changed:
         st.rerun()
     elif project_name:
         st.success(f"✅ '{project_name}' 진행 중")
     
-    # 기존 버튼들
     has_project_name = bool(project_name and project_name.strip())
     has_chat_history = bool(st.session_state[session_keys["chat_history"]])
     is_processing = st.session_state[session_keys["is_processing"]]
@@ -246,10 +237,10 @@ def render_example_questions(session_keys, is_processing):
         for i, question in enumerate(recall_questions[:4]):
             col_idx = i % 2
             with cols[col_idx]:
-                short_question = question[:25] + "..." if len(question) > 25 else question
+                label = question # 질문 전체 문구 그대로 사용
                 
                 if st.button(
-                    short_question, 
+                    label,
                     key=f"recall_example_{i}", 
                     use_container_width=True, 
                     disabled=is_processing,
@@ -259,42 +250,53 @@ def render_example_questions(session_keys, is_processing):
                     st.rerun()
 
 def render_chat_area(session_keys, is_processing):
-    """메인 채팅 영역 렌더링"""
+    """메인 채팅 영역 렌더링 - 빠른 모드 전용"""
     
-    render_improved_dashboard() # 상단 고정 시각화
-    render_example_questions(session_keys, is_processing) # 예시 질문 섹션
+    render_improved_dashboard()
+    render_example_questions(session_keys, is_processing)
     
     # 대화 기록 표시
     chat_container = st.container()
     with chat_container:
         display_chat_history(session_keys)
     
-    # 질문 처리
+    # 질문 처리 - 항상 빠른 모드로 스트리밍
     if st.session_state[session_keys["selected_question"]]:
         if not st.session_state.recall_processing_start_time:
             st.session_state.recall_processing_start_time = datetime.now()
         
         with st.chat_message("assistant"):
+            # 스트리밍 출력을 위한 빈 공간 생성
+            response_placeholder = st.empty()
+            
             with st.spinner("🔍 실시간 데이터 수집 및 분석 중..."):
                 try:
+                    # 스피너와 함께 초기 메시지 표시
+                    response_placeholder.markdown("💭 리콜 데이터를 분석하고 있습니다...")
+                    
                     current_question = st.session_state[session_keys["selected_question"]]
                     
-                    # agent_recall
+                    # agent_recall 실행
                     result = agent.run(
                         query=current_question,
-                        history=st.session_state[session_keys["langchain_history"]])
-
-                    # answer 추출/표시해줌
+                        history=st.session_state[session_keys["langchain_history"]]
+                    )
+                    
+                    # answer 추출
                     answer = result.get("answer", "답변을 생성할 수 없습니다.")
-                    st.markdown(answer, unsafe_allow_html=True)
-
-                    # 디버깅 출력 추가
-                    st.write("🔧 **Agent 결과 디버깅**")
-                    st.json(result)  # 전체 결과를 JSON으로 표시
-                    st.write(f"answer 타입: {type(result.get('answer'))}")
-                    st.write(f"answer 길이: {len(result.get('answer', ''))}")
-                    st.markdown("---")
-
+                    
+                    # 항상 빠른 모드로 스트리밍 (청크 단위)
+                    if answer:
+                        # 빠른 스트리밍 애니메이션 실행
+                        quick_stream_response(
+                            answer, 
+                            response_placeholder, 
+                            chunk_size=20,  # 한번에 20단어씩 표시
+                            delay=0.5  # 청크 간 0.5초 딜레이
+                        )
+                    else:
+                        response_placeholder.markdown("죄송합니다. 답변을 생성할 수 없습니다.")
+                    
                     # 처리 타입 표시
                     processing_type = result.get("processing_type", "unknown")
                     if processing_type == "agent":
@@ -311,8 +313,8 @@ def render_chat_area(session_keys, is_processing):
                     elif processing_type == "direct_answer":
                         st.info("💬 직접 답변")
                     else:
-                        st.info("🔄 처리 완료")
-                                        
+                        st.info("📄 처리 완료")
+                    
                     # 처리 시간 표시
                     if st.session_state.recall_processing_start_time:
                         processing_time = (datetime.now() - st.session_state.recall_processing_start_time).total_seconds()
@@ -322,9 +324,10 @@ def render_chat_area(session_keys, is_processing):
                     if result.get("has_realtime_data"):
                         st.info(f"⚡ 실시간 데이터 {result.get('realtime_count', 0)}건 포함됨")
                     
-                    # 시각화 데이터 업데이트 (고정 영역에 표시됨)
+                    # 시각화 데이터 업데이트
                     update_visualization_data()
                     
+                    # 히스토리 업데이트
                     update_chat_history(
                         current_question, 
                         answer, 
@@ -335,54 +338,19 @@ def render_chat_area(session_keys, is_processing):
                     reset_processing_state(session_keys)
                     st.session_state.recall_processing_start_time = None
                     
-                    # 실시간 신규 데이터 반영 시 캐시 정리
-                    if check_new_realtime_data():
-                        st.cache_data.clear()
-                        update_visualization_data()
+                    # 완료 메시지
+                    time.sleep(0.3)
+                    st.info("🔍 리콜 AI 답변 완료")
                     
                 except Exception as e:
-                    st.error(f"답변 생성 중 오류: {str(e)[:100]}...")
+                    response_placeholder.markdown(f"❌ 답변 생성 중 오류: {str(e)[:100]}...")
                     reset_processing_state(session_keys)
                     st.session_state.recall_processing_start_time = None
-                    
+                
                 st.rerun()
 
 def show_recall_chat():
-    # ===== 🔍 디버깅 섹션 =====
-    # with st.expander("🔍 디버깅 정보", expanded=False):
-    #     st.write("**시스템 상태:**")
-    #     st.write(f"- recall_vectorstore: {recall_vectorstore}")
-    #     st.write(f"- type: {type(recall_vectorstore)}")
-    #     st.write(f"- None 여부: {recall_vectorstore is None}")
-        
-    #     # 직접 검색 테스트
-    #     if st.button("🧪 살모넬라 직접 검색 테스트"):
-    #         try:
-    #             from utils.function_calling_system import search_recall_cases
-    #             test_result = search_recall_cases("salmonella", limit=3)
-    #             st.write("**직접 검색 결과:**")
-    #             st.json(test_result)
-    #         except Exception as e:
-    #             st.error(f"검색 테스트 오류: {e}")
-        
-    #     # DB 직접 확인
-    #     if st.button("🗄️ SQLite DB 직접 확인"):
-    #         try:
-    #             import sqlite3
-    #             conn = sqlite3.connect("./data/fda_recalls.db")
-    #             cursor = conn.cursor()
-    #             cursor.execute("""
-    #                 SELECT COUNT(*) FROM recalls 
-    #                 WHERE recall_reason_detail LIKE '%salmonella%' 
-    #                    OR content LIKE '%salmonella%'
-    #             """)
-    #             count = cursor.fetchone()[0]
-    #             st.write(f"SQLite에서 살모넬라 관련 레코드: {count}개")
-    #             conn.close()
-    #         except Exception as e:
-    #             st.error(f"DB 조회 오류: {e}")
-
-    """리콜 전용 챗봇 - 자동 시각화 + 동향 분석 버전"""
+    """리콜 전용 챗봇 - 빠른 모드 전용 버전"""
     st.info("""
     🔎 **자동 실시간 리콜 분석 시스템** 
     - 질문 시, 최신 리콜 데이터를 실시간으로 자동 수집
@@ -396,10 +364,11 @@ def show_recall_chat():
     # 세션 상태 초기화
     init_recall_session_state(session_keys)
 
-    # 레이아웃
-    col_left, col_center, col_right = st.columns([1, 3, 1])
+    # 레이아웃 - 설정 컬럼 제거하고 2개 컬럼만 사용
+    col_left, col_center = st.columns([1, 4])
    
     with col_left:
+        # 프로젝트 이름 입력
         project_name = st.text_input("프로젝트 이름", placeholder="리콜 프로젝트명", key="recall_project_input")
         
         # 사이드바 컨트롤 렌더링
@@ -411,7 +380,10 @@ def show_recall_chat():
         
         # 사용자 입력
         if not is_processing:
-            user_input = st.chat_input("리콜 관련 질문을 입력하세요 (자동으로 최신 데이터 수집 및 분석)", key="recall_chat_input")
+            user_input = st.chat_input(
+                "리콜 관련 질문을 입력하세요...", 
+                key="recall_chat_input"
+            )
             if user_input and user_input.strip():
                 if len(user_input.strip()) < 3:
                     st.warning("⚠️ 질문이 너무 짧습니다.")
@@ -421,5 +393,17 @@ def show_recall_chat():
         else:
             st.info("🔄 실시간 데이터 수집 및 분석 중입니다...")
 
-    with col_right:
-        pass
+# 추가 최적화 함수들
+def preload_recall_data():
+    """앱 시작 시 리콜 데이터 미리 로드"""
+    if "recall_preloaded" not in st.session_state:
+        st.session_state.viz_data = get_improved_visualization_data()
+        st.session_state.recall_preloaded = True
+
+def check_new_realtime_data():
+    """실시간 신규 데이터 확인"""
+    try:
+        return check_recent_data_update()
+    except Exception as e:
+        print(f"실시간 데이터 확인 오류: {e}")
+        return False
