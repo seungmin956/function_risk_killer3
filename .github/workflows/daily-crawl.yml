@@ -1,130 +1,130 @@
-# .github/workflows/daily-crawl.yml
-name: FDA Recall Data Daily Crawling
+# # .github/workflows/daily-crawl.yml
+# name: FDA Recall Data Daily Crawling
 
-on:
-  schedule:
-    # 매일 정오 KST (UTC 03:00)
-    - cron: '0 17 * * *'
-  workflow_dispatch:  # 수동 실행 가능
+# on:
+#   schedule:
+#     # 매일 정오 KST (UTC 03:00)
+#     - cron: '0 17 * * *'
+#   workflow_dispatch:  # 수동 실행 가능
 
-jobs:
-  crawl-and-update:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30  # 30분 제한
+# jobs:
+#   crawl-and-update:
+#     runs-on: ubuntu-latest
+#     timeout-minutes: 30  # 30분 제한
     
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        lfs: true    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
+#     steps:
+#     - name: Checkout repository
+#       uses: actions/checkout@v4
+#       with:
+#         lfs: true    
+#     - name: Set up Python
+#       uses: actions/setup-python@v4
+#       with:
+#         python-version: '3.11'
         
-    - name: Install system dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y sqlite3
+#     - name: Install system dependencies
+#       run: |
+#         sudo apt-get update
+#         sudo apt-get install -y sqlite3
         
-    - name: Cache pip dependencies
-      uses: actions/cache@v3
-      with:
-        path: ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
-        restore-keys: |
-          ${{ runner.os }}-pip-
+#     - name: Cache pip dependencies
+#       uses: actions/cache@v3
+#       with:
+#         path: ~/.cache/pip
+#         key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+#         restore-keys: |
+#           ${{ runner.os }}-pip-
           
-    - name: Install Python dependencies
-      run: |
-        python -m pip install --upgrade pip
-        # ✅ requirements.txt 사용 (있으면), 없으면 직접 설치
-        if [ -f requirements.txt ]; then
-          pip install -r requirements.txt
-        else
-          pip install playwright chromadb openai python-dotenv
-        fi
+#     - name: Install Python dependencies
+#       run: |
+#         python -m pip install --upgrade pip
+#         # ✅ requirements.txt 사용 (있으면), 없으면 직접 설치
+#         if [ -f requirements.txt ]; then
+#           pip install -r requirements.txt
+#         else
+#           pip install playwright chromadb openai python-dotenv
+#         fi
         
-    - name: Install Playwright browsers
-      run: |
-        playwright install chromium
-        playwright install-deps
+#     - name: Install Playwright browsers
+#       run: |
+#         playwright install chromium
+#         playwright install-deps
         
-    - name: Create data directory
-      run: |
-        mkdir -p ./data
+#     - name: Create data directory
+#       run: |
+#         mkdir -p ./data
         
-    - name: Download existing databases (if any)
-      continue-on-error: true
-      run: |
-        # 기존 DB 파일들이 repository에 있다면 복사
-        echo "기존 데이터베이스 확인 중..."
-        ls -la ./data/ || echo "데이터 폴더가 비어있습니다"
+#     - name: Download existing databases (if any)
+#       continue-on-error: true
+#       run: |
+#         # 기존 DB 파일들이 repository에 있다면 복사
+#         echo "기존 데이터베이스 확인 중..."
+#         ls -la ./data/ || echo "데이터 폴더가 비어있습니다"
         
-    - name: Run realtime crawling
-      env:
-        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      run: |
-        echo "=== FDA 실시간 크롤링 시작 ==="
-        echo "실행 시간: $(date '+%Y-%m-%d %H:%M:%S UTC')"
-        echo "한국 시간: $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M:%S KST')"
+#     - name: Run realtime crawling
+#       env:
+#         OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+#       run: |
+#         echo "=== FDA 실시간 크롤링 시작 ==="
+#         echo "실행 시간: $(date '+%Y-%m-%d %H:%M:%S UTC')"
+#         echo "한국 시간: $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M:%S KST')"
         
-        # ✅ 파이썬 스크립트 실행
-        if [ -f "fda_realtime_crawler.py" ]; then
-          python fda_realtime_crawler.py
-        else
-          echo "❌ fda_realtime_crawler.py 파일을 찾을 수 없습니다"
-          exit 1
-        fi
+#         # ✅ 파이썬 스크립트 실행
+#         if [ -f "fda_realtime_crawler.py" ]; then
+#           python fda_realtime_crawler.py
+#         else
+#           echo "❌ fda_realtime_crawler.py 파일을 찾을 수 없습니다"
+#           exit 1
+#         fi
         
-    - name: Check results
-      run: |
-        echo "=== 크롤링 결과 확인 ==="
+#     - name: Check results
+#       run: |
+#         echo "=== 크롤링 결과 확인 ==="
         
-        # JSON 파일 확인
-        echo "📄 JSON 파일들:"
-        ls -la ./data/realtime_recalls_*.json 2>/dev/null || echo "   새로운 JSON 파일 없음"
+#         # JSON 파일 확인
+#         echo "📄 JSON 파일들:"
+#         ls -la ./data/realtime_recalls_*.json 2>/dev/null || echo "   새로운 JSON 파일 없음"
         
-        # SQLite DB 확인
-        if [ -f "./data/fda_recalls.db" ]; then
-          echo "✅ SQLite DB 존재"
-          echo "   총 레코드 수:"
-          sqlite3 ./data/fda_recalls.db "SELECT COUNT(*) as total_records FROM recalls;" 2>/dev/null || echo "   DB 조회 실패"
-          echo "   최근 추가된 데이터:"
-          sqlite3 ./data/fda_recalls.db "SELECT COUNT(*) as today_records FROM recalls WHERE DATE(created_at) = DATE('now');" 2>/dev/null || echo "   오늘 데이터 조회 실패"
-        else
-          echo "❌ SQLite DB 없음"
-        fi
+#         # SQLite DB 확인
+#         if [ -f "./data/fda_recalls.db" ]; then
+#           echo "✅ SQLite DB 존재"
+#           echo "   총 레코드 수:"
+#           sqlite3 ./data/fda_recalls.db "SELECT COUNT(*) as total_records FROM recalls;" 2>/dev/null || echo "   DB 조회 실패"
+#           echo "   최근 추가된 데이터:"
+#           sqlite3 ./data/fda_recalls.db "SELECT COUNT(*) as today_records FROM recalls WHERE DATE(created_at) = DATE('now');" 2>/dev/null || echo "   오늘 데이터 조회 실패"
+#         else
+#           echo "❌ SQLite DB 없음"
+#         fi
         
-        # ChromaDB 확인
-        if [ -d "./data/chroma_db_recall" ]; then
-          echo "✅ ChromaDB 폴더 존재"
-          du -sh ./data/chroma_db_recall
-        else
-          echo "❌ ChromaDB 폴더 없음"
-        fi
+#         # ChromaDB 확인
+#         if [ -d "./data/chroma_db_recall" ]; then
+#           echo "✅ ChromaDB 폴더 존재"
+#           du -sh ./data/chroma_db_recall
+#         else
+#           echo "❌ ChromaDB 폴더 없음"
+#         fi
         
-    - name: Commit and push updated databases
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
+#     - name: Commit and push updated databases
+#       run: |
+#         git config --local user.email "action@github.com"
+#         git config --local user.name "GitHub Action"
         
-        # 변경사항이 있는지 확인
-        if [[ `git status --porcelain` ]]; then
-          echo "=== 데이터베이스 업데이트 감지 ==="
-          git add ./data/
-          git commit -m "🤖 Auto-update FDA recall data - $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M KST')"
-          git push
-          echo "✅ 데이터베이스 업데이트 완료"
-        else
-          echo "📋 새로운 데이터 없음 - 커밋 스킵"
-        fi
+#         # 변경사항이 있는지 확인
+#         if [[ `git status --porcelain` ]]; then
+#           echo "=== 데이터베이스 업데이트 감지 ==="
+#           git add ./data/
+#           git commit -m "🤖 Auto-update FDA recall data - $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M KST')"
+#           git push
+#           echo "✅ 데이터베이스 업데이트 완료"
+#         else
+#           echo "📋 새로운 데이터 없음 - 커밋 스킵"
+#         fi
         
-    - name: Notify completion
-      if: always()
-      run: |
-        if [ "${{ job.status }}" = "success" ]; then
-          echo "🎉 FDA 리콜 데이터 크롤링 성공!"
-        else
-          echo "❌ 크롤링 실패 - 로그를 확인하세요"
-        fi
+#     - name: Notify completion
+#       if: always()
+#       run: |
+#         if [ "${{ job.status }}" = "success" ]; then
+#           echo "🎉 FDA 리콜 데이터 크롤링 성공!"
+#         else
+#           echo "❌ 크롤링 실패 - 로그를 확인하세요"
+#         fi
